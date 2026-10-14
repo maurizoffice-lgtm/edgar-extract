@@ -28,6 +28,12 @@ Revenue is reported under different tags depending on company and year — the
 mapping must try several tags in priority order. Banks (e.g. JPM) often have no
 classic "Revenue" or "OperatingIncome"; handle missing ground truth explicitly.
 
+Known EDGAR quirks:
+- In 2026 the ticker XOM moved to a new holding company (CIK 2115436) without
+  10-Ks yet; Exxon's 10-Ks are under the old CIK 34088. See `PREDECESSOR_CIKS`
+  in `edgar.py`. Always use `Filing.cik` (not the ticker's current CIK) downstream.
+- Heavy filers (JPM) have older 10-Ks in paginated submission files, not in "recent".
+
 ## Phases
 0. Setup — structure, config, README skeleton
 1. EDGAR client — ticker → CIK, list 10-K filings, download main document
