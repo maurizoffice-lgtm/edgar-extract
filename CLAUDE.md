@@ -71,8 +71,35 @@ works, expand to ~20 companies × 5 years.
 Python 3.11+, venv + pip (pyproject.toml), httpx, anthropic SDK, pydantic,
 SQLite (stdlib `sqlite3`), pandas, Streamlit, pytest, python-dotenv.
 
-Models: default `claude-haiku-5-5` (cheap), comparison `claude-sonnet-5-5`.
-Model must be configurable, never hard-coded at call sites.
+Models: **the author does not want to pay**, so v1 uses free local models via Ollama
+(installed with Homebrew, API at http://localhost:11434). Model A = `qwen3.5:4b` (4.0 GB),
+model B = `qwen3.5:2b` (3.1 GB) — chosen by the author to save disk space; ask before
+downloading any further model. Claude
+(`claude-haiku-5-5` / `claude-sonnet-5-5`) stays an optional provider that must never
+be called without explicit approval. Model must be configurable, never hard-coded at call sites.
+
+Ollama findings (v0.40.4, qwen3.5:4b):
+- `format` (JSON mode / JSON schema) returns 501 "structured output is unavailable".
+  Tool calling works → use a tool whose parameters come from the pydantic schema, then
+  validate the arguments with pydantic.
+- Send `"think": false` (thinking model) and `temperature: 0`.
+- Real prompt tokens are ~2.4× the Phase-3 estimate (AAPL: 1,816 vs ~770), because
+  numbers split into many tokens. Always log the API's real counts.
+- Quotes from the model can be paraphrased; verify them against the source text.
+- Tool arguments don't always follow the schema types: qwen3.5:2b returned
+  `"value": "416,161"` (string with comma) instead of a number. Parse leniently
+  (strip commas, parentheses = negative) and count such format errors.
+- Ollama is not a login service: start it with `ollama serve` before extraction runs.
+
+Extraction findings (Phase 4, prompt v1, 10 filings, $0):
+- qwen3.5:4b: ~15 s per filing, ~2.5–3.6k input tokens. Nearly all values right on first look.
+  Errors seen: XOM 2024 EPS = 12 (the "Note Reference Number" column — see Phase 3 note);
+  JNJ OperatingIncome = "Earnings before provision for taxes" (no ground truth exists).
+- qwen3.5:2b: ~7 s per filing, values mostly returned as strings (format issues), unit
+  errors (JNJ "units" instead of millions → values 10^6 too small), XOM Revenue = "Sales and
+  other operating revenue" in "thousands", JPM Revenue = "Noninterest revenue", NetIncome
+  vs ProfitLoss confusion, EPS null.
+- Do not fix these before Phase 5 has measured the v1 baseline; then fix and re-measure.
 
 ## Layout
 ```

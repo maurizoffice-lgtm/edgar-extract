@@ -1,5 +1,6 @@
-"""SQLite storage. One file (data/edgar.db) holds filings, ground truth and later the LLM results."""
+"""SQLite storage. One file (data/edgar.db) holds filings, ground truth and the LLM results."""
 
+import json
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -10,7 +11,9 @@ from edgar_extract.config import DATA_DIR
 from edgar_extract.edgar import Filing
 
 if TYPE_CHECKING:
+    from edgar_extract.extract import MetricAnswer
     from edgar_extract.ground_truth import Fact
+    from edgar_extract.llm import LLMResponse
 
 DB_PATH = DATA_DIR / "edgar.db"
 
@@ -62,6 +65,36 @@ CREATE TABLE IF NOT EXISTS preprocessing (
     est_tokens_after  INTEGER NOT NULL,
     text_path         TEXT NOT NULL,
     created_at        TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- One LLM call per filing, model and prompt version.
+CREATE TABLE IF NOT EXISTS extraction_runs (
+    accession_number TEXT NOT NULL REFERENCES filings(accession_number),
+    model            TEXT NOT NULL,
+    prompt_version   TEXT NOT NULL,
+    input_tokens     INTEGER NOT NULL,
+    output_tokens    INTEGER NOT NULL,
+    duration_s       REAL NOT NULL,
+    cost_usd         REAL NOT NULL,
+    format_issues    TEXT NOT NULL,  -- JSON list, e.g. ["revenue:value_not_a_number"]
+    raw_response     TEXT NOT NULL,  -- full JSON answer of the model, for debugging
+    created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (accession_number, model, prompt_version)
+);
+
+-- The model's answer per metric. value_usd = value × unit scale, computed in code.
+CREATE TABLE IF NOT EXISTS extractions (
+    accession_number TEXT NOT NULL,
+    model            TEXT NOT NULL,
+    prompt_version   TEXT NOT NULL,
+    metric           TEXT NOT NULL,
+    value            REAL,
+    unit             TEXT,
+    value_usd        REAL,
+    quote            TEXT NOT NULL,
+    PRIMARY KEY (accession_number, model, prompt_version, metric),
+    FOREIGN KEY (accession_number, model, prompt_version)
+        REFERENCES extraction_runs(accession_number, model, prompt_version)
 );
 """
 
@@ -170,6 +203,42 @@ def save_preprocessing(
             text_path,
         ),
     )
+
+
+def save_extraction(
+    conn: sqlite3.Connection,
+    accession_number: str,
+    prompt_version: str,
+    response: "LLMResponse",
+    answers: "list[MetricAnswer]",
+    format_issues: list[str],
+) -> None:
+    """Replace the run and answers of one filing/model/prompt version (safe to re-run)."""
+    key = (accession_number, response.model, prompt_version)
+    conn.execute("DELETE FROM extractions WHERE accession_number = ? AND model = ? AND prompt_version = ?", key)
+    conn.execute("DELETE FROM extraction_runs WHERE accession_number = ? AND model = ? AND prompt_version = ?", key)
+    conn.execute(
+        """
+        INSERT INTO extraction_runs
+            (accession_number, model, prompt_version, input_tokens, output_tokens,
+             duration_s, cost_usd, format_issues, raw_response)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            *key,
+            response.input_tokens,
+            response.output_tokens,
+            response.duration_s,
+            response.cost_usd,
+            json.dumps(format_issues),
+            json.dumps(response.raw),
+        ),
+    )
+    for answer in answers:
+        conn.execute(
+            "INSERT INTO extractions VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (*key, answer.metric, answer.value, answer.unit, answer.value_usd, answer.quote),
+        )
 
 
 def _iso(value) -> str | None:
