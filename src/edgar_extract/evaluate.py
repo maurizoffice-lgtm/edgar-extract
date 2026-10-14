@@ -182,7 +182,7 @@ def evaluate(db_path: Path = db.DB_PATH) -> pd.DataFrame:
     with db.connect(db_path) as conn:
         runs = conn.execute(
             """
-            SELECT r.accession_number, r.model, r.prompt_version, f.ticker, f.fiscal_year, p.text_path
+            SELECT r.accession_number, r.model, r.version, f.ticker, f.fiscal_year, p.text_path
             FROM extraction_runs r
             JOIN filings f USING (accession_number)
             JOIN preprocessing p USING (accession_number)
@@ -203,7 +203,7 @@ def evaluate(db_path: Path = db.DB_PATH) -> pd.DataFrame:
         ):
             alternatives.setdefault((row["accession_number"], row["metric"]), {})[row["xbrl_tag"]] = row["value"]
         answers = {
-            (row["accession_number"], row["model"], row["prompt_version"], row["metric"]): row
+            (row["accession_number"], row["model"], row["version"], row["metric"]): row
             for row in conn.execute("SELECT * FROM extractions")
         }
 
@@ -214,7 +214,7 @@ def evaluate(db_path: Path = db.DB_PATH) -> pd.DataFrame:
         text = texts.setdefault(run["text_path"], (PROJECT_ROOT / run["text_path"]).read_text(encoding="utf-8"))
         filing_truths = {m: truths.get((acc, m)) for m in METRIC_FIELDS.values()}
         for metric in METRIC_FIELDS.values():
-            answer = answers.get((acc, run["model"], run["prompt_version"], metric))
+            answer = answers.get((acc, run["model"], run["version"], metric))
             value = answer["value"] if answer else None
             unit = answer["unit"] if answer else None
             value_usd = answer["value_usd"] if answer else None
@@ -233,7 +233,7 @@ def evaluate(db_path: Path = db.DB_PATH) -> pd.DataFrame:
                 {
                     "accession_number": acc,
                     "model": run["model"],
-                    "prompt_version": run["prompt_version"],
+                    "version": run["version"],
                     "ticker": run["ticker"],
                     "fiscal_year": run["fiscal_year"],
                     "metric": metric,
@@ -279,7 +279,7 @@ def _money(value) -> str:
 
 def build_report(evals: pd.DataFrame, runs: pd.DataFrame) -> str:
     evals = evals.copy()
-    evals["run"] = evals["model"] + " / " + evals["prompt_version"]
+    evals["run"] = evals["model"] + " / " + evals["version"]
     graded = evals[evals["truth"].notna()].copy()
     graded["correct"] = graded["category"] == CORRECT
     no_truth = evals[evals["truth"].isna()]
@@ -298,14 +298,14 @@ def build_report(evals: pd.DataFrame, runs: pd.DataFrame) -> str:
     ]
 
     runs = runs.copy()
-    runs["run"] = runs["model"] + " / " + runs["prompt_version"]
+    runs["run"] = runs["model"] + " / " + runs["version"]
     overall = []
     for run, group in graded.groupby("run"):
         r = runs[runs["run"] == run]
         quotes = evals[(evals["run"] == run) & evals["quote_in_source"].notna()]["quote_in_source"]
         overall.append(
             {
-                "Model / prompt": run,
+                "Model / version": run,
                 "Accuracy": _pct(group["correct"]),
                 "Avg input tokens": f"{r['input_tokens'].mean():,.0f}",
                 "Avg output tokens": f"{r['output_tokens'].mean():,.0f}",
@@ -348,12 +348,12 @@ def build_report(evals: pd.DataFrame, runs: pd.DataFrame) -> str:
     else:
         nt = no_truth.assign(answered=no_truth["category"] == NO_TRUTH_ANSWERED)
         summary = nt.groupby("run")["answered"].agg(lambda s: f"{int(s.sum())} of {len(s)} answered anyway")
-        lines += [_table(summary.reset_index().rename(columns={"run": "Model / prompt", "answered": "Result"})), ""]
+        lines += [_table(summary.reset_index().rename(columns={"run": "Model / version", "answered": "Result"})), ""]
         answered = nt[nt["answered"]].sort_values(["run", "ticker", "fiscal_year"])
         if not answered.empty:
             table = pd.DataFrame(
                 {
-                    "Model / prompt": answered["run"],
+                    "Model / version": answered["run"],
                     "Company": answered["ticker"],
                     "FY": answered["fiscal_year"],
                     "Metric": answered["metric"],
@@ -370,7 +370,7 @@ def build_report(evals: pd.DataFrame, runs: pd.DataFrame) -> str:
         detail = errors.sort_values(["run", "ticker", "fiscal_year", "metric"])
         table = pd.DataFrame(
             {
-                "Model / prompt": detail["run"],
+                "Model / version": detail["run"],
                 "Company": detail["ticker"],
                 "FY": detail["fiscal_year"],
                 "Metric": detail["metric"],
@@ -388,7 +388,7 @@ def build_report(evals: pd.DataFrame, runs: pd.DataFrame) -> str:
 def load_runs(db_path: Path = db.DB_PATH) -> pd.DataFrame:
     with db.connect(db_path) as conn:
         rows = conn.execute(
-            "SELECT model, prompt_version, input_tokens, output_tokens, duration_s, cost_usd, format_issues "
+            "SELECT model, version, input_tokens, output_tokens, duration_s, cost_usd, format_issues "
             "FROM extraction_runs"
         ).fetchall()
     df = pd.DataFrame([dict(r) for r in rows])
@@ -406,7 +406,7 @@ def main() -> None:
     path.write_text(report, encoding="utf-8")
 
     graded = evals[evals["truth"].notna()]
-    for (model, version), group in graded.groupby(["model", "prompt_version"]):
+    for (model, version), group in graded.groupby(["model", "version"]):
         correct = (group["category"] == CORRECT).sum()
         print(f"{model} / {version}: {correct}/{len(group)} correct ({correct / len(group):.0%})")
     print(f"\nReport written to {path.relative_to(PROJECT_ROOT)}")

@@ -8,7 +8,9 @@ import pytest
 
 from edgar_extract import db
 from edgar_extract.extract import (
+    apply_detected_units,
     build_prompt,
+    detect_scales,
     build_tool,
     extract_filing,
     normalize_unit,
@@ -159,7 +161,7 @@ def test_extract_filing_saves_to_sqlite(tmp_path):
 
     client = OllamaClient(cache_dir=tmp_path / "llm", http=httpx.Client(transport=httpx.MockTransport(fake_ollama([]))))
     for _ in range(2):  # re-running must not duplicate rows
-        extract_filing(client, "qwen3.5:4b", "acc-1", "text", date(2025, 9, 27), db_path=db_path)
+        extract_filing(client, "qwen3.5:4b", "acc-1", "text", date(2025, 9, 27), version="v2", db_path=db_path)
 
     with db.connect(db_path) as conn:
         runs = conn.execute("SELECT input_tokens, format_issues FROM extraction_runs").fetchall()
@@ -170,3 +172,73 @@ def test_extract_filing_saves_to_sqlite(tmp_path):
     assert json.loads(runs[0]["format_issues"]) == ["operating_income:value_not_a_number", "net_income:value_not_a_number"]
     assert values["Revenue"] == 416_161_000_000
     assert values["TotalAssets"] is None
+
+
+STATEMENTS_TEXT = """=== INCOME_STATEMENT ===
+CONSOLIDATED STATEMENTS OF OPERATIONS
+(In millions, except number of shares, which are reflected in thousands, and per-share amounts)
+Total net sales | $416,161 | $391,035
+=== BALANCE_SHEET ===
+Example Corp
+CONSOLIDATED BALANCE SHEETS
+(Dollars in Thousands)
+Total assets | 5,000 | 4,000"""
+
+
+def test_detect_scales_takes_first_scale_word_per_statement():
+    assert detect_scales(STATEMENTS_TEXT) == {"income_statement": "millions", "balance_sheet": "thousands"}
+
+
+def test_detect_scales_without_sections_or_header():
+    assert detect_scales("just some text in millions") == {}
+    assert detect_scales("=== BALANCE_SHEET ===\nTotal assets | 5\n") == {}
+
+
+def test_apply_detected_units_overrides_the_model():
+    answers, _ = parse_tool_arguments(
+        {
+            "revenue": {"value": 416161, "unit": "units", "quote": ""},  # model picked the wrong unit
+            "operating_income": {"value": None, "unit": "millions", "quote": ""},
+            "net_income": {"value": 112010, "unit": "per share", "quote": ""},
+            "eps_diluted": {"value": 7.46, "unit": "millions", "quote": ""},
+            "total_assets": {"value": 5000, "unit": "millions", "quote": ""},
+        }
+    )
+    fixed, issues = apply_detected_units(answers, STATEMENTS_TEXT)
+    by_metric = {a.metric: a for a in fixed}
+    assert by_metric["Revenue"].value_usd == 416_161_000_000
+    assert by_metric["NetIncome"].value_usd == 112_010_000_000
+    assert by_metric["EPS"].value_usd == 7.46
+    assert by_metric["TotalAssets"].value_usd == 5_000_000  # balance sheet is in thousands
+    assert by_metric["OperatingIncome"].value_usd is None
+    assert issues == []
+
+
+def test_apply_detected_units_falls_back_to_model_unit():
+    answers, _ = parse_tool_arguments({"revenue": {"value": 5, "unit": "millions", "quote": ""}})
+    fixed, issues = apply_detected_units(answers, "no section markers here")
+    assert fixed[0].value_usd == 5_000_000
+    assert issues == ["Revenue:scale_not_detected"]
+
+
+def test_v3_uses_v2_prompt_and_code_units(tmp_path):
+    calls: list = []
+    client = OllamaClient(cache_dir=tmp_path / "llm", http=httpx.Client(transport=httpx.MockTransport(fake_ollama(calls))))
+    db_path = tmp_path / "test.db"
+    with db.connect(db_path) as conn:
+        conn.execute(
+            "INSERT INTO filings VALUES ('acc-1', 'AAPL', 320193, '10-K', '2025-10-31', '2025-09-27', 2025, 'a.htm', 'u')"
+        )
+
+    extract_filing(client, "qwen3.5:4b", "acc-1", STATEMENTS_TEXT, date(2025, 9, 27), version="v2", db_path=db_path)
+    _, answers, _ = extract_filing(
+        client, "qwen3.5:4b", "acc-1", STATEMENTS_TEXT, date(2025, 9, 27), version="v3", db_path=db_path
+    )
+
+    assert len(calls) == 1  # v3 sends the same prompt as v2, so the answer comes from the cache
+    by_metric = {a.metric: a for a in answers}
+    assert by_metric["Revenue"].value_usd == 416_161_000_000  # income statement header says millions
+    assert by_metric["TotalAssets"].value_usd is None  # model gave no value
+    with db.connect(db_path) as conn:
+        versions = [r[0] for r in conn.execute("SELECT DISTINCT version FROM extraction_runs ORDER BY 1")]
+    assert versions == ["v2", "v3"]

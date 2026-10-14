@@ -123,6 +123,18 @@ Prompt v2 (only change vs v1: a general "Rules:" block in the prompt; tool and t
 - Idea for v3: detect the scale from the table header in code and stop asking the model
   for the unit (moves a weak-model task into deterministic code). Measure separately.
 
+Version 3 (= prompt v2 + scale read from the table header in code; LLM answers are the
+cached v2 answers, so only post-processing changed):
+- `extraction_runs`/`extractions`/`evaluations` use a `version` column (pipeline version:
+  prompt + post-processing). `VERSIONS` in extract.py maps each version to its prompt and
+  unit source. The DB was rebuilt from cache after the rename; v1/v2 scores unchanged.
+- qwen3.5:2b: 77 % → 95 % (unit errors 8 → 0). Remaining: JPM 2024 Revenue
+  ("Noninterest revenue") and NetIncome ("applicable to common stockholders") — wrong row.
+- qwen3.5:4b: stays 100 %.
+- `detect_scales` found "millions" in all 20 sections; "thousands"/"billions" are only
+  covered by unit tests so far — check again with more companies.
+- Lesson: move tasks a small model is bad at (choosing the scale) into deterministic code.
+
 ## Layout
 ```
 src/edgar_extract/   # package code

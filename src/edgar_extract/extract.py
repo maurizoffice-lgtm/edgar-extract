@@ -2,15 +2,17 @@
 
 For each metric the model reports the number as printed, its unit (scale) and a quote.
 The USD value is computed here in code (value × scale), not by the model, so that
-reading errors and unit errors can be told apart later.
+reading errors and unit errors can be told apart later. From v3 on, the scale is read
+from the table header in code and the model's unit is ignored.
 
 Usage:
-    python -m edgar_extract.extract                         # both default models, latest prompt, all filings
-    python -m edgar_extract.extract --models qwen3.5:4b --prompt-version v1
+    python -m edgar_extract.extract                         # both default models, latest version, all filings
+    python -m edgar_extract.extract --models qwen3.5:4b --version v1
 """
 
 import argparse
 import re
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
@@ -21,10 +23,6 @@ from edgar_extract.config import PROJECT_ROOT
 from edgar_extract.llm import LLMResponse, OllamaClient
 
 DEFAULT_MODELS = ["qwen3.5:4b", "qwen3.5:2b"]
-
-# Every prompt change gets a new version, so runs stay comparable. The tool stays the same.
-# v2 adds general rules against the error types found in the v1 evaluation.
-LATEST_PROMPT_VERSION = "v2"
 
 TOOL_NAME = "report_financials"
 
@@ -81,6 +79,21 @@ PROMPTS = {
 }
 
 
+@dataclass(frozen=True)
+class Version:
+    prompt: str  # key of PROMPTS
+    unit_source: str  # "model" = unit chosen by the model, "code" = read from the table header
+
+
+# Every change gets a new version, so runs stay comparable. The tool stays the same.
+VERSIONS = {
+    "v1": Version(prompt="v1", unit_source="model"),
+    "v2": Version(prompt="v2", unit_source="model"),  # general rules against the v1 error types
+    "v3": Version(prompt="v2", unit_source="code"),  # same LLM answers as v2 (cached); only the unit changes
+}
+LATEST_VERSION = "v3"
+
+
 def build_tool() -> dict:
     metric_schema = {
         "type": "object",
@@ -108,10 +121,10 @@ def build_tool() -> dict:
     }
 
 
-def build_prompt(text: str, report_date: date, prompt_version: str = LATEST_PROMPT_VERSION) -> str:
-    if prompt_version not in PROMPTS:
-        raise ValueError(f"Unknown prompt version {prompt_version!r}; known: {', '.join(PROMPTS)}")
-    template = PROMPTS[prompt_version]
+def build_prompt(text: str, report_date: date, prompt: str = "v2") -> str:
+    if prompt not in PROMPTS:
+        raise ValueError(f"Unknown prompt version {prompt!r}; known: {', '.join(PROMPTS)}")
+    template = PROMPTS[prompt]
     return template.format(report_date=report_date.isoformat(), tool_name=TOOL_NAME, text=text)
 
 
@@ -196,6 +209,50 @@ def parse_tool_arguments(arguments: dict | None) -> tuple[list[MetricAnswer], li
     return answers, issues
 
 
+# ------------------------------------------------------- unit from the table header
+
+SECTION_MARKER = re.compile(r"^=== ([A-Z_]+) ===$", re.M)
+SCALE_IN_HEADER = re.compile(r"\b(thousands|millions|billions)\b", re.I)
+HEADER_LINES = 5  # the scale is stated right below the statement title
+METRIC_SECTION = {
+    "Revenue": "income_statement",
+    "OperatingIncome": "income_statement",
+    "NetIncome": "income_statement",
+    "TotalAssets": "balance_sheet",
+}  # EPS is always "per share"
+
+
+def detect_scales(text: str) -> dict[str, str]:
+    """Scale per statement, e.g. {"income_statement": "millions"}, read from the section header.
+
+    Takes the first scale word: Apple writes "(In millions, except number of shares,
+    which are reflected in thousands, ...)" — amounts are in millions.
+    """
+    scales = {}
+    parts = SECTION_MARKER.split(text)  # ["", "INCOME_STATEMENT", body, "BALANCE_SHEET", body]
+    for name, body in zip(parts[1::2], parts[2::2]):
+        header = "\n".join(body.strip().splitlines()[:HEADER_LINES])
+        match = SCALE_IN_HEADER.search(header)
+        if match:
+            scales[name.lower()] = match.group(1).lower()
+    return scales
+
+
+def apply_detected_units(answers: list[MetricAnswer], text: str) -> tuple[list[MetricAnswer], list[str]]:
+    """Replace the model's unit with the scale found in the table header. Keeps the model's unit as fallback."""
+    scales = detect_scales(text)
+    updated, issues = [], []
+    for answer in answers:
+        unit = "per share" if answer.metric == "EPS" else scales.get(METRIC_SECTION[answer.metric])
+        if unit is None:
+            issues.append(f"{answer.metric}:scale_not_detected")
+            updated.append(answer)
+            continue
+        value_usd = answer.value * UNIT_SCALE[unit] if answer.value is not None else None
+        updated.append(answer.model_copy(update={"unit": unit, "value_usd": value_usd}))
+    return updated, issues
+
+
 # --------------------------------------------------------------------- pipeline
 
 
@@ -205,14 +262,19 @@ def extract_filing(
     accession_number: str,
     text: str,
     report_date: date,
-    prompt_version: str = LATEST_PROMPT_VERSION,
+    version: str = LATEST_VERSION,
     db_path: Path = db.DB_PATH,
 ) -> tuple[LLMResponse, list[MetricAnswer], list[str]]:
-    response = client.chat(model, build_prompt(text, report_date, prompt_version), [build_tool()])
+    spec = VERSIONS[version]
+    response = client.chat(model, build_prompt(text, report_date, spec.prompt), [build_tool()])
     answers, issues = parse_tool_arguments(response.tool_arguments)
+    if spec.unit_source == "code":
+        answers, unit_issues = apply_detected_units(answers, text)
+        # The model's own unit no longer matters, so its unit problems are not issues anymore.
+        issues = [i for i in issues if not i.endswith(":unknown_unit")] + unit_issues
 
     with db.connect(db_path) as conn:
-        db.save_extraction(conn, accession_number, prompt_version, response, answers, issues)
+        db.save_extraction(conn, accession_number, version, response, answers, issues)
     return response, answers, issues
 
 
@@ -227,7 +289,7 @@ def _short(answer: MetricAnswer | None) -> str:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--models", nargs="+", default=DEFAULT_MODELS)
-    parser.add_argument("--prompt-version", default=LATEST_PROMPT_VERSION, choices=list(PROMPTS))
+    parser.add_argument("--version", default=LATEST_VERSION, choices=list(VERSIONS))
     args = parser.parse_args(argv)
 
     with db.connect() as conn:
@@ -243,14 +305,14 @@ def main(argv: list[str] | None = None) -> None:
 
     client = OllamaClient()
     for model in args.models:
-        print(f"\n=== {model} (prompt {args.prompt_version}) ===")
+        print(f"\n=== {model} (version {args.version}) ===")
         print(f"{'Ticker':6} {'FY':4} " + " ".join(f"{m:>15}" for m in METRIC_FIELDS.values()) + "   tokens in/out   time  issues")
         total_in = total_out = 0
         total_time = total_cost = 0.0
         for row in filings:
             text = (PROJECT_ROOT / row["text_path"]).read_text(encoding="utf-8")
             response, answers, issues = extract_filing(
-                client, model, row["accession_number"], text, date.fromisoformat(row["report_date"]), args.prompt_version
+                client, model, row["accession_number"], text, date.fromisoformat(row["report_date"]), args.version
             )
             by_metric = {a.metric: a for a in answers}
             total_in += response.input_tokens

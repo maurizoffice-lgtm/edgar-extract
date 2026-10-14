@@ -148,7 +148,7 @@ def test_evaluate_grades_and_stores(small_db):
 def test_report_contains_sections(small_db):
     evals = evaluate(small_db)
     runs = pd.DataFrame(
-        [{"model": "m", "prompt_version": "v1", "input_tokens": 2500, "output_tokens": 300,
+        [{"model": "m", "version": "v1", "input_tokens": 2500, "output_tokens": 300,
           "duration_s": 15.0, "cost_usd": 0.0, "format_issue_count": 1}]
     )  # fmt: skip
     report = build_report(evals, runs)

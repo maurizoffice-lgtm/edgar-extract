@@ -69,11 +69,11 @@ CREATE TABLE IF NOT EXISTS preprocessing (
     created_at        TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- One LLM call per filing, model and prompt version.
+-- One LLM call per filing, model and version.
 CREATE TABLE IF NOT EXISTS extraction_runs (
     accession_number TEXT NOT NULL REFERENCES filings(accession_number),
     model            TEXT NOT NULL,
-    prompt_version   TEXT NOT NULL,
+    version          TEXT NOT NULL,  -- pipeline version (prompt + post-processing), e.g. "v3"
     input_tokens     INTEGER NOT NULL,
     output_tokens    INTEGER NOT NULL,
     duration_s       REAL NOT NULL,
@@ -81,22 +81,22 @@ CREATE TABLE IF NOT EXISTS extraction_runs (
     format_issues    TEXT NOT NULL,  -- JSON list, e.g. ["revenue:value_not_a_number"]
     raw_response     TEXT NOT NULL,  -- full JSON answer of the model, for debugging
     created_at       TEXT NOT NULL DEFAULT (datetime('now')),
-    PRIMARY KEY (accession_number, model, prompt_version)
+    PRIMARY KEY (accession_number, model, version)
 );
 
 -- The model's answer per metric. value_usd = value × unit scale, computed in code.
 CREATE TABLE IF NOT EXISTS extractions (
     accession_number TEXT NOT NULL,
     model            TEXT NOT NULL,
-    prompt_version   TEXT NOT NULL,
+    version          TEXT NOT NULL,  -- pipeline version (prompt + post-processing), e.g. "v3"
     metric           TEXT NOT NULL,
     value            REAL,
     unit             TEXT,
     value_usd        REAL,
     quote            TEXT NOT NULL,
-    PRIMARY KEY (accession_number, model, prompt_version, metric),
-    FOREIGN KEY (accession_number, model, prompt_version)
-        REFERENCES extraction_runs(accession_number, model, prompt_version)
+    PRIMARY KEY (accession_number, model, version, metric),
+    FOREIGN KEY (accession_number, model, version)
+        REFERENCES extraction_runs(accession_number, model, version)
 );
 
 -- Grade of every answer. category: correct / missing / unit_error / wrong_year /
@@ -104,7 +104,7 @@ CREATE TABLE IF NOT EXISTS extractions (
 CREATE TABLE IF NOT EXISTS evaluations (
     accession_number TEXT NOT NULL,
     model            TEXT NOT NULL,
-    prompt_version   TEXT NOT NULL,
+    version          TEXT NOT NULL,  -- pipeline version (prompt + post-processing), e.g. "v3"
     ticker           TEXT NOT NULL,
     fiscal_year      INTEGER NOT NULL,
     metric           TEXT NOT NULL,
@@ -116,7 +116,7 @@ CREATE TABLE IF NOT EXISTS evaluations (
     detail           TEXT NOT NULL,
     quote            TEXT NOT NULL,
     quote_in_source  INTEGER,  -- 1/0, NULL if no value was given
-    PRIMARY KEY (accession_number, model, prompt_version, metric)
+    PRIMARY KEY (accession_number, model, version, metric)
 );
 """
 
@@ -230,19 +230,19 @@ def save_preprocessing(
 def save_extraction(
     conn: sqlite3.Connection,
     accession_number: str,
-    prompt_version: str,
+    version: str,
     response: "LLMResponse",
     answers: "list[MetricAnswer]",
     format_issues: list[str],
 ) -> None:
-    """Replace the run and answers of one filing/model/prompt version (safe to re-run)."""
-    key = (accession_number, response.model, prompt_version)
-    conn.execute("DELETE FROM extractions WHERE accession_number = ? AND model = ? AND prompt_version = ?", key)
-    conn.execute("DELETE FROM extraction_runs WHERE accession_number = ? AND model = ? AND prompt_version = ?", key)
+    """Replace the run and answers of one filing/model/version (safe to re-run)."""
+    key = (accession_number, response.model, version)
+    conn.execute("DELETE FROM extractions WHERE accession_number = ? AND model = ? AND version = ?", key)
+    conn.execute("DELETE FROM extraction_runs WHERE accession_number = ? AND model = ? AND version = ?", key)
     conn.execute(
         """
         INSERT INTO extraction_runs
-            (accession_number, model, prompt_version, input_tokens, output_tokens,
+            (accession_number, model, version, input_tokens, output_tokens,
              duration_s, cost_usd, format_issues, raw_response)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
@@ -264,7 +264,7 @@ def save_extraction(
 
 
 EVALUATION_COLUMNS = [
-    "accession_number", "model", "prompt_version", "ticker", "fiscal_year", "metric", "truth",
+    "accession_number", "model", "version", "ticker", "fiscal_year", "metric", "truth",
     "value", "unit", "value_usd", "category", "detail", "quote", "quote_in_source",
 ]  # fmt: skip
 
