@@ -3,7 +3,7 @@
 > LLM-based extraction of financial metrics from SEC 10-K filings — with automatic
 > evaluation against XBRL data as ground truth.
 
-**Status:** 🚧 work in progress (Phase 1 — EDGAR client done)
+**Status:** 🚧 work in progress (Phase 2 — XBRL ground truth done)
 
 ## Problem
 

@@ -34,6 +34,15 @@ Known EDGAR quirks:
   in `edgar.py`. Always use `Filing.cik` (not the ticker's current CIK) downstream.
 - Heavy filers (JPM) have older 10-Ks in paginated submission files, not in "recent".
 
+Ground-truth findings (Phase 2, 5 companies × 2 years):
+- No `OperatingIncomeLoss` in XBRL for JNJ, JPM, XOM → OperatingIncome ground truth is NULL
+  (6 of 50 values). Evaluation must treat these as "no ground truth", not as LLM errors.
+- XOM's `Revenues` is "Total revenues and other income", not "Sales and other operating
+  revenue" — an LLM may plausibly pick the smaller line. Expect this as an error category.
+- XOM `NetIncomeLoss` (attributable to ExxonMobil) vs `ProfitLoss` (incl. noncontrolling
+  interests) differ by ~1 B; both are stored in `xbrl_candidates`.
+- `fiscal_year` = calendar year of the fiscal-year end date (MSFT FY ending 2026-06-30 → 2026).
+
 ## Phases
 0. Setup — structure, config, README skeleton
 1. EDGAR client — ticker → CIK, list 10-K filings, download main document
