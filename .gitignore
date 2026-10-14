@@ -24,3 +24,6 @@ dist/
 
 # Local SQLite database (rebuilt by the scripts; a copy for the dashboard is published in Phase 6)
 data/*.db
+
+# Extracted financial sections (rebuilt by edgar_extract.preprocess)
+data/processed/

@@ -43,6 +43,17 @@ Ground-truth findings (Phase 2, 5 companies × 2 years):
   interests) differ by ~1 B; both are stored in `xbrl_candidates`.
 - `fiscal_year` = calendar year of the fiscal-year end date (MSFT FY ending 2026-06-30 → 2026).
 
+Preprocessing findings (Phase 3):
+- Only income statement + balance sheet are sent to the LLM: ~9.5k of ~1.3M estimated
+  tokens (0.7 %). `answer_in_text` checks every ground-truth value is in the extract
+  (44/44) — if it isn't, that's a preprocessing bug, not an LLM error.
+- Title variants: MSFT uses "INCOME STATEMENTS"/"BALANCE SHEETS" (no "Consolidated");
+  XOM writes "Earnings per common share – assuming dilution". JPM has parent-company
+  statements in the notes that must not be picked.
+- Empty table cells are dropped, so a "Note" column (XOM) can shift values left in rows
+  without a note number. Possible future improvement — measure before changing.
+- Token counts in Phase 3 are estimates (chars / 4); exact counts come from the API in Phase 4.
+
 ## Phases
 0. Setup — structure, config, README skeleton
 1. EDGAR client — ticker → CIK, list 10-K filings, download main document

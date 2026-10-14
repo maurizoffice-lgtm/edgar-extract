@@ -50,6 +50,19 @@ CREATE TABLE IF NOT EXISTS xbrl_candidates (
     period_end       TEXT NOT NULL,
     PRIMARY KEY (accession_number, metric, xbrl_tag)
 );
+
+-- How each 10-K was shortened before going to the LLM. Token numbers are estimates.
+CREATE TABLE IF NOT EXISTS preprocessing (
+    accession_number  TEXT PRIMARY KEY REFERENCES filings(accession_number),
+    method            TEXT NOT NULL,  -- "sections" or "full_text" (fallback)
+    sections_found    TEXT NOT NULL,  -- comma-separated, e.g. "income_statement,balance_sheet"
+    chars_before      INTEGER NOT NULL,
+    chars_after       INTEGER NOT NULL,
+    est_tokens_before INTEGER NOT NULL,
+    est_tokens_after  INTEGER NOT NULL,
+    text_path         TEXT NOT NULL,
+    created_at        TEXT NOT NULL DEFAULT (datetime('now'))
+);
 """
 
 
@@ -125,6 +138,38 @@ def save_ground_truth(
                 _iso(fact.period_end),
             ),
         )
+
+
+def save_preprocessing(
+    conn: sqlite3.Connection,
+    *,
+    accession_number: str,
+    method: str,
+    sections_found: list[str],
+    chars_before: int,
+    chars_after: int,
+    est_tokens_before: int,
+    est_tokens_after: int,
+    text_path: str,
+) -> None:
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO preprocessing
+            (accession_number, method, sections_found, chars_before, chars_after,
+             est_tokens_before, est_tokens_after, text_path)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            accession_number,
+            method,
+            ",".join(sections_found),
+            chars_before,
+            chars_after,
+            est_tokens_before,
+            est_tokens_after,
+            text_path,
+        ),
+    )
 
 
 def _iso(value) -> str | None:
