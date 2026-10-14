@@ -5,8 +5,8 @@ The USD value is computed here in code (value × scale), not by the model, so th
 reading errors and unit errors can be told apart later.
 
 Usage:
-    python -m edgar_extract.extract                         # both default models, all filings
-    python -m edgar_extract.extract --models qwen3.5:4b
+    python -m edgar_extract.extract                         # both default models, latest prompt, all filings
+    python -m edgar_extract.extract --models qwen3.5:4b --prompt-version v1
 """
 
 import argparse
@@ -22,8 +22,9 @@ from edgar_extract.llm import LLMResponse, OllamaClient
 
 DEFAULT_MODELS = ["qwen3.5:4b", "qwen3.5:2b"]
 
-# Bump this whenever the prompt or the tool changes, so runs stay comparable.
-PROMPT_VERSION = "v1"
+# Every prompt change gets a new version, so runs stay comparable. The tool stays the same.
+# v2 adds general rules against the error types found in the v1 evaluation.
+LATEST_PROMPT_VERSION = "v2"
 
 TOOL_NAME = "report_financials"
 
@@ -46,7 +47,7 @@ METRIC_DESCRIPTIONS = {
     "total_assets": "Total assets at the fiscal year end",
 }
 
-PROMPT_TEMPLATE = """You are extracting financial data from the financial statements of a company's annual report (Form 10-K).
+_INTRO = """You are extracting financial data from the financial statements of a company's annual report (Form 10-K).
 
 The fiscal year to report on ends on {report_date}. The statements also show prior years; use only the column for the fiscal year ending {report_date}.
 
@@ -55,10 +56,29 @@ Call the tool {tool_name} exactly once. For each metric give:
 - unit: the scale stated in the table header (e.g. "In millions"); for earnings per share use "per share",
 - quote: the table row the number comes from, copied from the text.
 If a metric does not appear in the statements, set its value to null.
+"""
 
+_STATEMENTS = """
 Financial statements:
 
 {text}"""
+
+# Rules address error *types* seen in the v1 evaluation; they must stay general
+# (no company names, no expected numbers), otherwise the evaluation means nothing.
+_RULES_V2 = """
+Rules:
+- value must be a plain JSON number without commas, currency signs or quotes (e.g. 416161, -321, 7.46).
+- Some tables have a column with note reference numbers (small whole numbers such as 3 or 12, often under a "Note" header). These are not amounts; never report them.
+- unit: the scale is stated once in the table header, e.g. "(In millions)" or "(millions of dollars)". All amounts in that table use this scale. Earnings per share is always "per share".
+- revenue: use the line that totals all revenue (its label usually starts with "Total"), not a single component of revenue.
+- operating_income: only a line explicitly labeled operating income (or income from operations). Income before income taxes is NOT operating income. If there is no such line, set value to null.
+- net_income: net income attributable to the company itself — not the amount including noncontrolling interests, and not the amount "applicable to common stockholders".
+"""
+
+PROMPTS = {
+    "v1": _INTRO + _STATEMENTS,
+    "v2": _INTRO + _RULES_V2 + _STATEMENTS,
+}
 
 
 def build_tool() -> dict:
@@ -88,8 +108,11 @@ def build_tool() -> dict:
     }
 
 
-def build_prompt(text: str, report_date: date) -> str:
-    return PROMPT_TEMPLATE.format(report_date=report_date.isoformat(), tool_name=TOOL_NAME, text=text)
+def build_prompt(text: str, report_date: date, prompt_version: str = LATEST_PROMPT_VERSION) -> str:
+    if prompt_version not in PROMPTS:
+        raise ValueError(f"Unknown prompt version {prompt_version!r}; known: {', '.join(PROMPTS)}")
+    template = PROMPTS[prompt_version]
+    return template.format(report_date=report_date.isoformat(), tool_name=TOOL_NAME, text=text)
 
 
 # ------------------------------------------------------------ reading the answer
@@ -182,13 +205,14 @@ def extract_filing(
     accession_number: str,
     text: str,
     report_date: date,
+    prompt_version: str = LATEST_PROMPT_VERSION,
     db_path: Path = db.DB_PATH,
 ) -> tuple[LLMResponse, list[MetricAnswer], list[str]]:
-    response = client.chat(model, build_prompt(text, report_date), [build_tool()])
+    response = client.chat(model, build_prompt(text, report_date, prompt_version), [build_tool()])
     answers, issues = parse_tool_arguments(response.tool_arguments)
 
     with db.connect(db_path) as conn:
-        db.save_extraction(conn, accession_number, PROMPT_VERSION, response, answers, issues)
+        db.save_extraction(conn, accession_number, prompt_version, response, answers, issues)
     return response, answers, issues
 
 
@@ -203,6 +227,7 @@ def _short(answer: MetricAnswer | None) -> str:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--models", nargs="+", default=DEFAULT_MODELS)
+    parser.add_argument("--prompt-version", default=LATEST_PROMPT_VERSION, choices=list(PROMPTS))
     args = parser.parse_args(argv)
 
     with db.connect() as conn:
@@ -218,14 +243,14 @@ def main(argv: list[str] | None = None) -> None:
 
     client = OllamaClient()
     for model in args.models:
-        print(f"\n=== {model} (prompt {PROMPT_VERSION}) ===")
+        print(f"\n=== {model} (prompt {args.prompt_version}) ===")
         print(f"{'Ticker':6} {'FY':4} " + " ".join(f"{m:>15}" for m in METRIC_FIELDS.values()) + "   tokens in/out   time  issues")
         total_in = total_out = 0
         total_time = total_cost = 0.0
         for row in filings:
             text = (PROJECT_ROOT / row["text_path"]).read_text(encoding="utf-8")
             response, answers, issues = extract_filing(
-                client, model, row["accession_number"], text, date.fromisoformat(row["report_date"])
+                client, model, row["accession_number"], text, date.fromisoformat(row["report_date"]), args.prompt_version
             )
             by_metric = {a.metric: a for a in answers}
             total_in += response.input_tokens

@@ -80,10 +80,25 @@ def test_parse_tool_arguments_missing_parts():
     assert parse_tool_arguments(None) == ([], ["no_tool_call"])
 
 
-def test_prompt_names_fiscal_year_and_contains_text():
-    prompt = build_prompt("Total net sales | 416,161", date(2025, 9, 27))
+@pytest.mark.parametrize("version", ["v1", "v2"])
+def test_prompt_names_fiscal_year_and_contains_text(version):
+    prompt = build_prompt("Total net sales | 416,161", date(2025, 9, 27), version)
     assert "2025-09-27" in prompt
-    assert "Total net sales | 416,161" in prompt
+    assert prompt.endswith("Total net sales | 416,161")
+
+
+def test_v2_adds_general_rules_to_v1():
+    v1 = build_prompt("TEXT", date(2025, 9, 27), "v1")
+    v2 = build_prompt("TEXT", date(2025, 9, 27), "v2")
+    assert "Rules:" not in v1
+    assert "note reference numbers" in v2
+    assert "Income before income taxes is NOT operating income" in v2
+    assert len(v2) > len(v1)
+
+
+def test_unknown_prompt_version_is_rejected():
+    with pytest.raises(ValueError, match="Unknown prompt version"):
+        build_prompt("TEXT", date(2025, 9, 27), "v99")
 
 
 def test_tool_requires_all_five_metrics():

@@ -112,6 +112,17 @@ Evaluation baseline (Phase 5, prompt v1, 44 graded values per model) — see rep
   preprocessing; prompt: "do not use note reference numbers", "if there is no operating
   income line, return null".
 
+Prompt v2 (only change vs v1: a general "Rules:" block in the prompt; tool and text unchanged):
+- qwen3.5:4b: 98 % → 100 % (note number fixed). Still answers OperatingIncome for JNJ
+  with "income before taxes" (2 of 6) despite the rule.
+- qwen3.5:2b: 75 % → 77 %. Format issues 43 → 8, guessing OperatingIncome 4 → 0, but unit
+  errors 5 → 8: JNJ header "(Dollars and Shares in Millions …)" → model picks "units";
+  XOM NetIncome unit "per share". In every unit error the printed number itself was right.
+- Caveat: these 10 filings are also the development set — 100 % here is not proof of
+  generalization. Check on new companies (the 20 × 5 expansion) before claiming it.
+- Idea for v3: detect the scale from the table header in code and stop asking the model
+  for the unit (moves a weak-model task into deterministic code). Measure separately.
+
 ## Layout
 ```
 src/edgar_extract/   # package code
