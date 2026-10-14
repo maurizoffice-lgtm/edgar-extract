@@ -3,7 +3,7 @@
 > LLM-based extraction of financial metrics from SEC 10-K filings — with automatic
 > evaluation against XBRL data as ground truth.
 
-**Status:** 🚧 work in progress (Phase 4 — LLM extraction done)
+**Status:** 🚧 work in progress (Phase 5 — evaluation done)
 
 ## Problem
 

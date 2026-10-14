@@ -11,6 +11,8 @@ from edgar_extract.config import DATA_DIR
 from edgar_extract.edgar import Filing
 
 if TYPE_CHECKING:
+    import pandas as pd
+
     from edgar_extract.extract import MetricAnswer
     from edgar_extract.ground_truth import Fact
     from edgar_extract.llm import LLMResponse
@@ -95,6 +97,26 @@ CREATE TABLE IF NOT EXISTS extractions (
     PRIMARY KEY (accession_number, model, prompt_version, metric),
     FOREIGN KEY (accession_number, model, prompt_version)
         REFERENCES extraction_runs(accession_number, model, prompt_version)
+);
+
+-- Grade of every answer. category: correct / missing / unit_error / wrong_year /
+-- wrong_metric / other, or no_truth_answered / no_truth_null when there is no ground truth.
+CREATE TABLE IF NOT EXISTS evaluations (
+    accession_number TEXT NOT NULL,
+    model            TEXT NOT NULL,
+    prompt_version   TEXT NOT NULL,
+    ticker           TEXT NOT NULL,
+    fiscal_year      INTEGER NOT NULL,
+    metric           TEXT NOT NULL,
+    truth            REAL,
+    value            REAL,
+    unit             TEXT,
+    value_usd        REAL,
+    category         TEXT NOT NULL,
+    detail           TEXT NOT NULL,
+    quote            TEXT NOT NULL,
+    quote_in_source  INTEGER,  -- 1/0, NULL if no value was given
+    PRIMARY KEY (accession_number, model, prompt_version, metric)
 );
 """
 
@@ -239,6 +261,25 @@ def save_extraction(
             "INSERT INTO extractions VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (*key, answer.metric, answer.value, answer.unit, answer.value_usd, answer.quote),
         )
+
+
+EVALUATION_COLUMNS = [
+    "accession_number", "model", "prompt_version", "ticker", "fiscal_year", "metric", "truth",
+    "value", "unit", "value_usd", "category", "detail", "quote", "quote_in_source",
+]  # fmt: skip
+
+
+def save_evaluations(conn: sqlite3.Connection, evaluations: "pd.DataFrame") -> None:
+    """Replace all evaluation rows (they are always recomputed from scratch)."""
+    conn.execute("DELETE FROM evaluations")
+    rows = evaluations[EVALUATION_COLUMNS].astype(object).where(evaluations[EVALUATION_COLUMNS].notna(), None)
+    conn.executemany(
+        f"INSERT INTO evaluations ({', '.join(EVALUATION_COLUMNS)}) VALUES ({', '.join('?' * len(EVALUATION_COLUMNS))})",
+        [
+            tuple(int(v) if isinstance(v, bool) else v for v in row)
+            for row in rows.itertuples(index=False, name=None)
+        ],
+    )
 
 
 def _iso(value) -> str | None:

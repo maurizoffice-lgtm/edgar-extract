@@ -101,6 +101,17 @@ Extraction findings (Phase 4, prompt v1, 10 filings, $0):
   vs ProfitLoss confusion, EPS null.
 - Do not fix these before Phase 5 has measured the v1 baseline; then fix and re-measure.
 
+Evaluation baseline (Phase 5, prompt v1, 44 graded values per model) — see reports/evaluation.md:
+- qwen3.5:4b: 98 % (43/44). Only error: XOM 2024 EPS = note number 12 ("other").
+- qwen3.5:2b: 75 % (33/44). 5 unit errors, 5 wrong metric, 1 missing; 43 format issues.
+- Where no ground truth exists, both models fill OperatingIncome with "income before
+  taxes" (4b: 2 of 6, 2b: 4 of 6).
+- Quote check is lenient: label-only quotes ("Net earnings") count as found. Possible
+  improvement: require the quote to contain the reported number.
+- Ideas for v2 (measure each change separately): keep the note column / empty cells in
+  preprocessing; prompt: "do not use note reference numbers", "if there is no operating
+  income line, return null".
+
 ## Layout
 ```
 src/edgar_extract/   # package code
