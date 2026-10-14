@@ -22,8 +22,12 @@ dist/
 .idea/
 .vscode/
 
-# Local SQLite database (rebuilt by the scripts; a copy for the dashboard is published in Phase 6)
+# Local SQLite database (rebuilt by the scripts). Only the public dashboard copy is committed.
 data/*.db
+!data/dashboard.db
 
 # Extracted financial sections (rebuilt by edgar_extract.preprocess)
 data/processed/
+
+# Local Claude Code / editor settings
+.claude/

@@ -1,0 +1,4 @@
+# Only what the dashboard needs (for deploying it, e.g. on Streamlit Community Cloud).
+streamlit>=1.50
+pandas>=2.2
+altair>=5.0

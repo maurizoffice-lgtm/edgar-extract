@@ -162,4 +162,25 @@ reports/             # generated Markdown evaluation reports
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 pytest
+
+# Full pipeline (everything is cached; only new filings/versions cost time)
+python -m edgar_extract.download
+python -m edgar_extract.ground_truth
+python -m edgar_extract.preprocess
+ollama serve &                                   # local LLMs
+python -m edgar_extract.extract --version v3
+python -m edgar_extract.evaluate                 # writes reports/evaluation.md
+python -m edgar_extract.export_dashboard         # writes data/dashboard.db (committed)
+streamlit run dashboard/app.py
 ```
+
+## Dashboard (Phase 6)
+- `dashboard/app.py` + `dashboard/dashboard_data.py` read **only** `data/dashboard.db`
+  (read-only). No edgar_extract import, no Ollama, no API key → deployable on its own with
+  `dashboard/requirements.txt`. Re-run `export_dashboard` after every evaluation.
+- `data/dashboard.db` is the only committed database (no raw responses, no local paths, no
+  personal data). `data/edgar.db` stays local.
+- Navigation uses `st.radio` instead of `st.tabs`: tabs reset to the first one when a table
+  row selection reruns the app; a segmented control can be "unselected" by a second click.
+- Colors: categorical slots 1–2 of the validated reference palette (blue/orange), light and
+  dark steps; each model keeps its color in every view. Escape "$" in st.markdown text.
