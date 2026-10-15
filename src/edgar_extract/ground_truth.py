@@ -8,7 +8,7 @@ the filing (accession number) it came from. For each 10-K we keep only values th
 3. cover roughly one year (not a quarter) for income-statement metrics.
 
 Usage:
-    python -m edgar_extract.ground_truth              # default 5 companies, 2 reports each
+    python -m edgar_extract.ground_truth              # development + test companies (see datasets.py)
     python -m edgar_extract.ground_truth AAPL -n 5
 """
 
@@ -20,7 +20,7 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from edgar_extract import db
-from edgar_extract.download import DEFAULT_TICKERS
+from edgar_extract.datasets import selection
 from edgar_extract.edgar import EdgarClient, Filing
 
 COMPANYFACTS_URL = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json"
@@ -143,14 +143,14 @@ def _format(fact: Fact | None) -> str:
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("tickers", nargs="*", default=DEFAULT_TICKERS)
-    parser.add_argument("-n", "--count", type=int, default=2, help="10-Ks per company")
+    parser.add_argument("tickers", nargs="*", help="default: all development and test companies")
+    parser.add_argument("-n", "--count", type=int, help="10-Ks per company (default 2 for custom tickers)")
     args = parser.parse_args(argv)
 
     client = EdgarClient()
     print(f"{'Ticker':6} {'FY end':10} " + " ".join(f"{m:>15}" for m in METRICS))
-    for ticker in args.tickers:
-        for filing in client.list_10k_filings(ticker, limit=args.count):
+    for ticker, count in selection(args.tickers, args.count):
+        for filing in client.list_10k_filings(ticker, limit=count):
             truth = build_ground_truth(client, ticker, filing)
             print(f"{ticker:6} {filing.report_date!s:10} " + " ".join(f"{_format(truth[m]):>15}" for m in METRICS))
 

@@ -1,6 +1,7 @@
 """Tests for grading LLM answers and sorting errors into categories."""
 
 import json
+import sqlite3
 
 import pandas as pd
 import pytest
@@ -149,10 +150,35 @@ def test_report_contains_sections(small_db):
     evals = evaluate(small_db)
     runs = pd.DataFrame(
         [{"model": "m", "version": "v1", "input_tokens": 2500, "output_tokens": 300,
-          "duration_s": 15.0, "cost_usd": 0.0, "format_issue_count": 1}]
+          "duration_s": 15.0, "cost_usd": 0.0, "format_issue_count": 1, "dataset": "development"}]
     )  # fmt: skip
     report = build_report(evals, runs)
     assert "| m / v1 | 50% (2/4)" in report  # Revenue + NetIncome right, EPS + TotalAssets wrong
     assert "## Error categories" in report
     assert "Value missing" in report
     assert "0 of 1 answered anyway" in report
+
+
+def test_report_separates_held_out_test_set(small_db):
+    evals = evaluate(small_db)
+    assert set(evals["dataset"]) == {"development"}  # XOM was used for development
+    test_evals = evals.assign(dataset="test", ticker="NFLX")
+    runs = pd.DataFrame(
+        [{"model": "m", "version": "v1", "input_tokens": 2500, "output_tokens": 300, "duration_s": 15.0,
+          "cost_usd": 0.0, "format_issue_count": 0, "dataset": dataset} for dataset in ("development", "test")]
+    )  # fmt: skip
+    report = build_report(pd.concat([evals, test_evals]), runs)
+    assert "**Held-out test:** 1 filings from 1 companies (NFLX)" in report
+    assert "| Development | m / v1 | 50% (2/4)" in report
+    assert "| Held-out test | m / v1 | 50% (2/4)" in report
+    assert "m / v1 · Development | m / v1 · Held-out test" in report  # per-metric columns
+
+
+def test_old_database_gets_dataset_column(tmp_path):
+    db_path = tmp_path / "old.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE evaluations (accession_number TEXT, metric TEXT)")  # created before "dataset" existed
+    conn.close()
+    with db.connect(db_path) as conn:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(evaluations)")}
+    assert "dataset" in columns

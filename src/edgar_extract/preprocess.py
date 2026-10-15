@@ -6,10 +6,12 @@ sheet (Total assets). Sending only those pages to the LLM is cheaper and gives i
 less to get confused by.
 
 Statement titles appear many times in a 10-K (table of contents, sentences, the
-auditor's report). The real statement is recognized by
+auditor's report, summary tables in the management discussion). The real statement is
+recognized by
 1. a title that stands alone on its line,
-2. typical line items below it (e.g. "Total assets"), and
-3. many numbers right after it.
+2. typical line items below it (e.g. "Total assets"),
+3. a title that says "consolidated" (if any candidate does), and
+4. many numbers right after it.
 
 Usage:
     python -m edgar_extract.preprocess      # all filings in the database
@@ -89,8 +91,17 @@ def html_to_text(html: bytes | str) -> str:
 # ------------------------------------------------------ find financial statements
 
 # "Consolidated" is optional: e.g. Microsoft titles its statements just "INCOME STATEMENTS".
-INCOME_TITLE = r"(?:consolidated )?(?:statements? of (?:operations|income|earnings)|income statements?)\b"
-BALANCE_TITLE = r"(?:consolidated )?(?:balance sheets?|statements? of financial (?:position|condition))\b"
+# Some companies drop "statement of": "Consolidated Results of Operations for the Years
+# Ended ...", "Consolidated Financial Position at ...". Without the date these are common
+# headings in the management discussion, so the date is required here.
+INCOME_TITLE = (
+    r"(?:consolidated )?(?:statements? of (?:operations|income|earnings)|income statements?)\b"
+    r"|consolidated results of operations(?= for the (?:fiscal )?years? ended)"
+)
+BALANCE_TITLE = (
+    r"(?:consolidated )?(?:balance sheets?|statements? of financial (?:position|condition))\b"
+    r"|consolidated financial (?:position|condition)(?= (?:at|as of) )"
+)
 OTHER_TITLE = (
     r"(?:consolidated )?(?:statements? of (?:comprehensive (?:income|loss)|cash flows?"
     r"|(?:changes in )?(?:share|stock)holders[’']? equity|equity)"
@@ -100,11 +111,14 @@ ANY_TITLE = f"{INCOME_TITLE}|{BALANCE_TITLE}|{OTHER_TITLE}"
 
 # A title line may start with the company name, but must not continue like a sentence,
 # a table-of-contents entry ("... for the years ended 2025 ...") or another kind of table.
+# A trailing colon introduces a table inside a note ("Consolidated Statements of Income:").
 MAX_TITLE_REMAINDER = 60
 NOT_A_TITLE = re.compile(
-    r"\d|analysis|data|changes|impact|line item|total|refer|see |comprehensive|parent|condensed|segment|gaap",
+    r"\d|analysis|data|changes|impact|line item|total|refer|see |comprehensive|parent|condensed|segment|gaap|:\s*$",
     re.I,
 )
+# A title may end with its date, e.g. "... for the Years Ended December 31," (without a year).
+TITLE_DATE = re.compile(r"\b(?:for the (?:fiscal )?years? ended|at|as of) [a-z]+ \d{1,2},?$", re.I)
 # Any short line naming a statement ends the previous section.
 MAX_STOP_LINE = 100
 
@@ -124,7 +138,8 @@ STATEMENTS = [
     StatementKind(
         name="income_statement",
         title=INCOME_TITLE,
-        required=[["net income", "net earnings", "net loss"], ["per share", "per common share", "dilut"]],
+        # "profit": some companies call net income just "Profit".
+        required=[["net income", "net earnings", "net loss", "profit"], ["per share", "per common share", "dilut"]],
     ),
     StatementKind(
         name="balance_sheet",
@@ -142,6 +157,12 @@ class Section:
     end: int
     score: int
 
+    @property
+    def rank(self) -> tuple[bool, int]:
+        # Summary tables elsewhere in a 10-K ("Income statement", "Average balance sheet")
+        # can hold more numbers than the statement itself, but rarely say "consolidated".
+        return "consolidated" in self.title.lower(), self.score
+
 
 def _matching_lines(text: str, pattern: str):
     """Yield (line_start, line, remainder) for each match; remainder = line without the match."""
@@ -156,11 +177,12 @@ def _matching_lines(text: str, pattern: str):
 
 def _title_lines(text: str, pattern: str) -> list[tuple[int, str]]:
     """Positions (line start) of lines that are a statement title on their own."""
-    return [
-        (start, line)
-        for start, line, remainder in _matching_lines(text, pattern)
-        if len(remainder) <= MAX_TITLE_REMAINDER and not NOT_A_TITLE.search(remainder)
-    ]
+    titles = []
+    for start, line, remainder in _matching_lines(text, pattern):
+        remainder = TITLE_DATE.sub("", remainder).strip()
+        if len(remainder) <= MAX_TITLE_REMAINDER and not NOT_A_TITLE.search(remainder):
+            titles.append((start, line))
+    return titles
 
 
 def _stop_positions(text: str) -> list[int]:
@@ -181,8 +203,9 @@ def find_statement(text: str, kind: StatementKind) -> Section | None:
         if not all(any(word in body for word in group) for group in kind.required):
             continue
         score = len(NUMBER.findall(text, start, min(end, start + SCORE_WINDOW)))
-        if best is None or score > best.score:
-            best = Section(kind.name, title, start, end, score)
+        candidate = Section(kind.name, title, start, end, score)
+        if best is None or candidate.rank > best.rank:
+            best = candidate
     return best
 
 
@@ -212,10 +235,12 @@ def answer_in_text(value: float, metric: str, text: str) -> bool:
     If not, the LLM cannot possibly find it — a preprocessing problem, not an LLM error.
     """
     plain = text.replace(",", "")
+    value = abs(value)  # losses are printed in parentheses: "(2,722)"
     if metric == "EPS":
         variants = {f"{value:.2f}"}
     else:
-        variants = {str(round(value / 1e6)), str(round(value / 1e3)), str(round(value))}
+        # Some companies print one decimal in millions, e.g. "25,493.7".
+        variants = {f"{value / scale:.{decimals}f}" for scale in (1e6, 1e3, 1) for decimals in (0, 1)}
     return any(re.search(rf"(?<![\d.]){re.escape(v)}(?!\d)", plain) for v in variants)
 
 

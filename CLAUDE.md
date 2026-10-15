@@ -64,8 +64,8 @@ Preprocessing findings (Phase 3):
 6. Dashboard — Streamlit, reads **only** from SQLite (no API key needed)
 7. README — problem, Mermaid architecture, results, top errors, cost per filing, how to run (done)
 
-Scope: start with AAPL, MSFT, JNJ, JPM, XOM × last 2 10-Ks. Only after that
-works, expand to ~20 companies × 5 years.
+Scope: development set AAPL, MSFT, JNJ, JPM, XOM × last 2 10-Ks; held-out test set
+20 more companies × last 5 10-Ks (`datasets.py`). Never tune prompts on the test set.
 
 ## Tech stack
 Python 3.11+, venv + pip (pyproject.toml), httpx, BeautifulSoup + lxml, Ollama (local LLMs), pydantic,
@@ -134,6 +134,26 @@ cached v2 answers, so only post-processing changed):
 - `detect_scales` found "millions" in all 20 sections; "thousands"/"billions" are only
   covered by unit tests so far — check again with more companies.
 - Lesson: move tasks a small model is bad at (choosing the scale) into deterministic code.
+
+Held-out test (v3 unchanged, 20 companies × 5 10-Ks = 100 filings, 470 graded values):
+- `datasets.py` defines development vs test by ticker; `evaluations.dataset` stores it
+  (added to old DBs by `db.ADDED_COLUMNS`), report and dashboard always split by data set.
+- qwen3.5:4b: 100 % dev → 97 % (455/470) test. qwen3.5:2b: 95 % dev → 90 % (421/470).
+- 10 errors are ground-truth artifacts (value not in the statements): DIS OperatingIncome
+  (no such line; XBRL from segment note) and NEE Revenue (XBRL tag = note value, statement
+  shows "Operating revenues"). Without them: 4b 455/460, 2b 421/460.
+- Real 2b errors: NetIncome incl. noncontrolling interests (ProfitLoss) 21 — the v2 rule
+  did not generalize; Boeing losses left null ("Net loss", "Loss from operations") 13.
+  4b: 5 real errors. Unit errors: 0 on 100 filings (NFLX in thousands detected correctly).
+- No ground truth: CAT has no NetIncomeLoss (uses "Profit"), V has no EarningsPerShareDiluted
+  (per share class); OperatingIncome NULL for BAC, TRV, PFE, CVX.
+- Preprocessing fixes made before the test extraction (dev texts byte-identical): prefer
+  titles with "consolidated" (BAC MD&A "Income statement"/"Average balance sheet"), titles
+  "Consolidated Results of Operations for the Years Ended …" / "Consolidated Financial
+  Position at …" (CAT; without the date they are MD&A headings, e.g. TRV), "profit" as net
+  income word, ignore titles ending in ":" (PFE note table). `answer_in_text` now handles
+  negatives and one-decimal millions (MCD).
+- The test set is now "seen": fixing its errors needs another fresh held-out set.
 
 ## Layout
 ```

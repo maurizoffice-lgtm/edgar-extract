@@ -1,27 +1,26 @@
 """Download the latest 10-K filings for a list of companies.
 
 Usage:
-    python -m edgar_extract.download                  # default 5 companies, 2 reports each
+    python -m edgar_extract.download                  # development + test companies (see datasets.py)
     python -m edgar_extract.download AAPL MSFT -n 5   # custom tickers / count
 """
 
 import argparse
 
 from edgar_extract.config import PROJECT_ROOT
+from edgar_extract.datasets import selection
 from edgar_extract.edgar import EdgarClient
-
-DEFAULT_TICKERS = ["AAPL", "MSFT", "JNJ", "JPM", "XOM"]
 
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("tickers", nargs="*", default=DEFAULT_TICKERS)
-    parser.add_argument("-n", "--count", type=int, default=2, help="10-Ks per company")
+    parser.add_argument("tickers", nargs="*", help="default: all development and test companies")
+    parser.add_argument("-n", "--count", type=int, help="10-Ks per company (default 2 for custom tickers)")
     args = parser.parse_args(argv)
 
     client = EdgarClient()
-    for ticker in args.tickers:
-        filings = client.list_10k_filings(ticker, limit=args.count)
+    for ticker, count in selection(args.tickers, args.count):
+        filings = client.list_10k_filings(ticker, limit=count)
         if not filings:
             print(f"{ticker:5} no 10-K filings found")
         for filing in filings:

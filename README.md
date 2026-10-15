@@ -3,9 +3,11 @@
 > How accurately can a small, free LLM pull five financial metrics out of an SEC 10-K?
 > This project measures it against the companies' own XBRL data, explains every error,
 > and improves the pipeline measurably — from **75 % to 95 %** for a 2-billion-parameter
-> model running on a laptop, at a cost of **$0**.
+> model running on a laptop, at a cost of **$0**. On **20 held-out companies** it never saw
+> during development, the 4b model scores **97 %** and the 2b model **90 %**.
 
-**Status:** ✅ first complete iteration on a small sample (5 companies × 2 years).
+**Status:** ✅ development set (5 companies × 2 years) + held-out test set (20 new
+companies × 5 years, 100 filings).
 
 ![Dashboard overview: accuracy by model and version](docs/dashboard-overview.jpg)
 
@@ -39,7 +41,7 @@ flowchart LR
     S --> D["download.py<br/>ticker → CIK → 10-Ks<br/>rate-limited, cached"]
     H --> D
     X --> G["ground_truth.py<br/>match by accession number<br/>+ fiscal-year end"]
-    D --> P["preprocess.py<br/>HTML → text<br/>keep income statement<br/>+ balance sheet (0.7 %)"]
+    D --> P["preprocess.py<br/>HTML → text<br/>keep income statement<br/>+ balance sheet (0.9 %)"]
     P --> E["extract.py + llm.py<br/>tool call: value · unit · quote<br/>v3: scale read in code"]
     O["Ollama (local)<br/>qwen3.5:4b · qwen3.5:2b"] <--> E
     G --> DB[("SQLite<br/>data/edgar.db")]
@@ -58,9 +60,60 @@ never downloads or computes anything twice.
 
 ## Results
 
+Two data sets (defined in [`datasets.py`](src/edgar_extract/datasets.py)):
+
+- **Development:** AAPL, MSFT, JNJ, JPM, XOM × latest 2 10-Ks. Every prompt rule and code
+  change below was made while looking at these filings — so their scores are optimistic.
+- **Held-out test:** 20 companies added afterwards, × latest 5 10-Ks — NVDA, GOOGL, AMZN,
+  NFLX, BAC (bank), TRV (insurer), UNH, PFE, WMT and HD (fiscal year ends in January),
+  KO, PG, MCD, CAT, BA (losses), CVX, VZ, NEE, V, DIS. Netflix reports in thousands.
+  Nothing in the prompts was changed after seeing these results.
+
+A value is correct if it is within 0.5 % of the XBRL value. Metrics a company does not
+report (no ground truth) are not graded.
+
+### Held-out test: does it generalize?
+
+v3 pipeline, unchanged; 100 filings × 5 metrics, 30 without ground truth → **470 graded values**.
+
+| Model | Development (44 values) | **Held-out test (470 values)** | Held-out, values printed in the statements (460) |
+|---|---|---|---|
+| qwen3.5:4b | 100 % | **97 % (455/470)** | 99 % (455/460) |
+| qwen3.5:2b | 95 % | **90 % (421/470)** | 92 % (421/460) |
+
+Both models lose a few points on unseen companies — as expected, since the development
+score was measured on the same filings the rules were written for. The ranking stays the
+same and the gap between the models widens (5 → 7 points).
+
+10 of the errors are not the models' fault: the ground-truth value does not appear in the
+statements the model reads (the preprocessing coverage check flags exactly these):
+
+- **Disney, operating income (5×):** Disney's income statement has no operating-income
+  line; the XBRL value comes from the segment note. Both models correctly returned "not
+  reported", which is graded as missing.
+- **NextEra, revenue (5×):** the XBRL ground truth is `RevenueFromContractWithCustomer…`
+  (a note value, e.g. $23.5 B), while the statement shows "Operating revenues" ($24.8 B).
+  Both models report the statement line.
+
+The **real** errors on the held-out set:
+
+| Error | qwen3.5:2b | qwen3.5:4b |
+|---|---|---|
+| Net income *including* noncontrolling interests (`ProfitLoss`) instead of attributable to the company | 21 | 2 |
+| Losses (Boeing): value left empty when the row says "Net loss" / "Loss from operations" | 13 | 1 |
+| Other (EPS from continuing operations, net income "applicable to common shareholders", a number from another line, one empty value) | 5 | 2 |
+| **Total** | **39** | **5** |
+
+The 2b model's two big error types were seen during development too (ExxonMobil
+`ProfitLoss`, JPMorgan "applicable to common") — the v2 rule fixed them there, but it does
+**not** generalize: on 20 new companies the small model still picks the wrong net-income
+line in 21 cases. The scale-in-code idea (v3) **did** generalize: 0 unit errors on 100 new
+filings, including Netflix's thousands.
+
+### Development set: how the pipeline was built
+
 10 filings × 5 metrics = 50 values per model; 6 have no ground truth (see
 [below](#4-guessing-a-metric-the-company-does-not-report)), so **44 values are graded**.
-A value is correct if it is within 0.5 % of the XBRL value.
 
 | Version | What changed | qwen3.5:2b | qwen3.5:4b |
 |---|---|---|---|
@@ -77,7 +130,7 @@ Errors per category (graded values only):
 | Value missing | 1 | 0 | 0 | 0 | 0 | 0 |
 | Other (note reference number) | 0 | 0 | 0 | 1 | **0** | 0 |
 
-Full breakdown per metric, per company and every single error:
+Full breakdown per metric, per company and every single error (both data sets):
 [reports/evaluation.md](reports/evaluation.md).
 
 ## Most common errors — and what I did about them
@@ -134,7 +187,21 @@ format issue: 43 issues in v1 → 8 in v2 after the rule *"value must be a plain
 - Microsoft titles its statements "INCOME STATEMENTS" (no "Consolidated"); ExxonMobil
   writes "Earnings per common share – assuming dilution". Both broke the first heuristics.
 - A built-in check confirms that every ground-truth value appears in the shortened text
-  (44/44), so a miss is always the model's fault, never the preprocessing's.
+  (44/44 on development), so a miss is the model's fault, not the preprocessing's.
+- **New companies broke the preprocessing, too** (fixed *before* any extraction run on the
+  test set, guided only by that coverage check; the 10 development texts stayed byte-identical):
+  - Bank of America has summary tables titled "Income statement" and "Average balance
+    sheet" in its management discussion, with more numbers than the real statements.
+    Fix: prefer titles that say "consolidated".
+  - Caterpillar titles its statements "Consolidated Results of Operations for the Years
+    Ended December 31" and "Consolidated Financial Position at December 31" and calls net
+    income "Profit" — no statement was found at all, so the whole 10-K would have been sent.
+  - Pfizer has a restatement table "Consolidated Statements of Income:" in its notes. A
+    title ending in a colon is now ignored.
+  - The coverage check itself missed losses printed in parentheses and McDonald's amounts
+    with one decimal ("25,493.7").
+  - Coverage on the held-out set: 460/470 values; the 10 misses are the Disney/NextEra
+    ground-truth cases above.
 - In 2026 ExxonMobil moved its ticker to a new holding company without 10-Ks yet; its
   filings are found under the predecessor's CIK.
 
@@ -142,13 +209,14 @@ format issue: 43 issues in v1 → 8 in v2 after the rule *"value must be a plain
 
 | Model | Avg input tokens | Avg output tokens | Time per filing* | Cost |
 |---|---|---|---|---|
-| qwen3.5:2b | 3,045 | 203 | 6.9 s | $0 |
-| qwen3.5:4b | 3,045 | 291 | 15.8 s | $0 |
+| qwen3.5:2b | 3,033 | 206 | 6.4 s | $0 |
+| qwen3.5:4b | 3,033 | 309 | 15.0 s | $0 |
 
-\* Apple M1 Pro, 16 GB, Ollama 0.40, prompt v2/v3.
+\* Apple M1 Pro, 16 GB, Ollama 0.40, v3, all 110 filings. The held-out run took
+~25 min (4b) + ~11 min (2b).
 
-- **Preprocessing does the heavy lifting:** the full 10-Ks are ~1.3 million tokens
-  (estimated), the two statements sent to the model ~9,500 (0.7 %).
+- **Preprocessing does the heavy lifting:** the 110 full 10-Ks are ~12.5 million tokens
+  (estimated), the two statements sent to the model ~108,000 (0.9 %).
 - SEC data is free; the whole project cost **$0**.
 - For comparison only (not run): at list prices of Oct 2026, `claude-haiku-5-5`
   ($0.10 / $0.50 per million input/output tokens) would cost roughly **$0.0005 per
@@ -156,11 +224,16 @@ format issue: 43 issues in v1 → 8 in v2 after the rule *"value must be a plain
 
 ## Limitations
 
-- **Small sample, no held-out set.** 10 filings from 5 companies — and the v2 rules and
-  v3 change were developed on the same filings. 100 % / 95 % here is not proof that the
-  pipeline generalizes; that needs new companies.
-- All five companies report in millions. Detecting thousands/billions is covered by unit
-  tests only.
+- **The held-out set is now "used".** Its errors are known, so any fix for them (e.g. a
+  rule for net losses) would make it a development set. A credible re-test needs another
+  set of unseen companies.
+- The preprocessing fixes above were made after looking at held-out filings (but before any
+  model saw them, and without touching prompts). They are general rules, not company names.
+- Large US companies only. Netflix confirms the thousands scale; billions is covered by
+  unit tests only.
+- Ground truth can disagree with the statement (Disney, NextEra above), and some companies
+  lack a tag entirely: Caterpillar has no `NetIncomeLoss`, Visa no `EarningsPerShareDiluted`
+  (it reports per share class). These values are ungraded or graded against a note value.
 - The quote check is lenient: a quote that is only a row label ("Net earnings") counts as
   found in the source.
 - Ground-truth choices matter: ExxonMobil's `Revenues` tag is "Total revenues and other
@@ -169,7 +242,8 @@ format issue: 43 issues in v1 → 8 in v2 after the rule *"value must be a plain
 
 ## Next steps
 
-1. Expand to ~20 companies × 5 years as a held-out test set before changing anything else.
+1. Small-model fixes for the two held-out error types (net losses, noncontrolling
+   interests) — measured as v4 on the development set plus a **new** set of unseen companies.
 2. Keep empty table cells / the note column in preprocessing so columns line up
    (root cause of error 3), and measure it as its own version.
 3. Stricter quote check: the quote must contain the reported number.
@@ -202,13 +276,13 @@ ollama serve                    # keep running in a second terminal
 ollama pull qwen3.5:4b
 ollama pull qwen3.5:2b
 
-python -m edgar_extract.download           # 10-K documents -> data/cache/
+python -m edgar_extract.download           # 10-K documents -> data/cache/ (25 companies, see datasets.py)
 python -m edgar_extract.ground_truth       # XBRL ground truth -> data/edgar.db
 python -m edgar_extract.preprocess         # income statement + balance sheet only
 python -m edgar_extract.extract --version v3   # also try --version v1 / v2
 python -m edgar_extract.evaluate           # -> reports/evaluation.md
 python -m edgar_extract.export_dashboard   # -> data/dashboard.db
-pytest                                     # 82 tests, no network needed
+pytest                                     # 91 tests, no network needed
 ```
 
 ### Deploy the dashboard
@@ -222,6 +296,7 @@ branch `main`, main file `dashboard/app.py`. Dependencies come from
 ```
 src/edgar_extract/
   edgar.py, download.py     SEC client: ticker → CIK → 10-K list → document (cached, rate-limited)
+  datasets.py               development vs held-out test companies
   ground_truth.py           XBRL companyfacts → ground truth per filing
   preprocess.py             HTML → text, find income statement + balance sheet
   llm.py, extract.py        Ollama client (cached) and the extraction versions v1–v3

@@ -13,12 +13,16 @@ from pathlib import Path
 
 from edgar_extract import db
 from edgar_extract.config import DATA_DIR, PROJECT_ROOT
+from edgar_extract.datasets import dataset_of
 
 DASHBOARD_DB_PATH = DATA_DIR / "dashboard.db"
 
 # table -> SELECT that fills it (from the working database, attached as "src")
 EXPORTS = {
-    "filings": "SELECT accession_number, ticker, cik, form, filing_date, report_date, fiscal_year, url FROM src.filings",
+    "filings": (
+        "SELECT accession_number, ticker, cik, form, filing_date, report_date, fiscal_year, url, "
+        "dataset_of(ticker) AS dataset FROM src.filings"
+    ),
     "ground_truth": "SELECT * FROM src.ground_truth",
     "extraction_runs": (
         "SELECT accession_number, model, version, input_tokens, output_tokens, duration_s, cost_usd, format_issues "
@@ -33,6 +37,7 @@ def export(source: Path = db.DB_PATH, target: Path = DASHBOARD_DB_PATH, project_
     """Write the dashboard database from scratch. Returns the row count per table."""
     target.unlink(missing_ok=True)
     conn = sqlite3.connect(target)
+    conn.create_function("dataset_of", 1, dataset_of, deterministic=True)
     try:
         conn.execute("ATTACH DATABASE ? AS src", (str(source),))
         for table, select in EXPORTS.items():

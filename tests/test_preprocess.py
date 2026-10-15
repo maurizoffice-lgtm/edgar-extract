@@ -80,3 +80,41 @@ def test_answer_in_text_handles_units():
 
 def test_estimate_tokens():
     assert estimate_tokens(4_000) == 1_000
+
+
+def test_answer_in_text_handles_losses_and_decimals():
+    text = "Net income (loss) | $(2,722) | $33,364\nTotal revenues | 25,493.7 | 23,182.6"
+    assert answer_in_text(-2_722_000_000, "NetIncome", text)  # printed in parentheses
+    assert answer_in_text(25_493_700_000, "Revenue", text)  # millions with one decimal
+    assert answer_in_text(-0.27, "EPS", "Diluted | $(0.27)")
+
+
+def _statement(title: str, rows: int = 5, columns: int = 3) -> str:
+    numbers = " | ".join(f"{1_000 + i:,}" for i in range(columns))
+    body = "\n".join(f"Line item {i} | {numbers}" for i in range(rows))
+    return f"{title}\n(In millions)\n{body}\nNet income | {numbers}\nDiluted earnings per share | 1.23 | 1.11\n"
+
+
+def test_prefers_consolidated_title_over_bigger_summary_table():
+    # A quarterly summary table in the management discussion has more numbers than the statement.
+    summary = _statement("Income statement", rows=20, columns=8)
+    statement = _statement("Consolidated Statement of Income")
+    section = find_statement(f"{summary}\n{statement}", INCOME)
+    assert section is not None and section.title == "Consolidated Statement of Income"
+
+
+def test_title_with_trailing_colon_is_a_note_table():
+    note = _statement("Consolidated Statements of Income:", rows=20, columns=8)
+    statement = _statement("Consolidated Statements of Income")
+    section = find_statement(f"{statement}\n{note}", INCOME)
+    assert section is not None and section.title == "Consolidated Statements of Income"
+
+
+def test_results_of_operations_title_needs_its_date():
+    heading = _statement("Consolidated Results of Operations", rows=20)  # a heading in the discussion
+    statement = _statement("Consolidated Results of Operations for the Years Ended December 31,")
+    section = find_statement(f"{heading}\n{statement}", INCOME)
+    assert section is not None and section.title.endswith("December 31,")
+
+    balance = "Consolidated Financial Position at December 31,\nTotal assets | 87,764\nTotal liabilities | 68,270\n"
+    assert find_statement(balance, BALANCE) is not None

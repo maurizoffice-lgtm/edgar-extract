@@ -11,6 +11,9 @@ Wrong values are sorted into categories, checked in this order:
 Metrics without ground truth (e.g. OperatingIncome for banks) are not counted in the
 accuracy; they are reported separately ("answered although not reported").
 
+Results are always shown per data set: the development companies (used to tune prompts
+and code) and the held-out test companies (never used for tuning), see datasets.py.
+
 Usage:
     python -m edgar_extract.evaluate      # evaluates all runs, writes reports/evaluation.md
 """
@@ -25,6 +28,7 @@ import pandas as pd
 
 from edgar_extract import db
 from edgar_extract.config import PROJECT_ROOT, REPORTS_DIR
+from edgar_extract.datasets import DEVELOPMENT, TEST, dataset_of
 from edgar_extract.extract import METRIC_FIELDS, UNIT_SCALE
 
 TOLERANCE = 0.005  # 0.5 % relative
@@ -245,6 +249,7 @@ def evaluate(db_path: Path = db.DB_PATH) -> pd.DataFrame:
                     "detail": verdict.detail,
                     "quote": quote,
                     "quote_in_source": quote_in_source(quote, text) if value is not None else None,
+                    "dataset": dataset_of(run["ticker"]),
                 }
             )
 
@@ -277,12 +282,37 @@ def _money(value) -> str:
     return f"{value / 1e6:,.0f} M"
 
 
+DATASET_LABELS = {DEVELOPMENT: "Development", TEST: "Held-out test"}
+
+
+def _with_labels(df: pd.DataFrame) -> pd.DataFrame:
+    """Add "run" (model / version), "set" (data set label) and "column" (both, for wide tables)."""
+    df = df.copy()
+    df["run"] = df["model"] + " / " + df["version"]
+    df["set"] = df["dataset"].map(DATASET_LABELS)
+    df["column"] = df["run"] + " · " + df["set"]
+    return df
+
+
+def _column_order(df: pd.DataFrame) -> list[str]:
+    """Wide-table columns: development runs first, then held-out test runs."""
+    keys = df[["dataset", "run", "column"]].drop_duplicates()
+    keys = keys.assign(order=keys["dataset"].map(list(DATASET_LABELS).index)).sort_values(["order", "run"])
+    return list(keys["column"])
+
+
+def _dataset_summary(evals: pd.DataFrame, dataset: str) -> str:
+    filings = evals[evals["dataset"] == dataset]
+    tickers = sorted(filings["ticker"].unique())
+    return f"{filings['accession_number'].nunique()} filings from {len(tickers)} companies ({', '.join(tickers)})"
+
+
 def build_report(evals: pd.DataFrame, runs: pd.DataFrame) -> str:
-    evals = evals.copy()
-    evals["run"] = evals["model"] + " / " + evals["version"]
+    evals = _with_labels(evals)
     graded = evals[evals["truth"].notna()].copy()
     graded["correct"] = graded["category"] == CORRECT
     no_truth = evals[evals["truth"].isna()]
+    columns = _column_order(evals)
 
     lines = [
         "# Evaluation report",
@@ -290,22 +320,33 @@ def build_report(evals: pd.DataFrame, runs: pd.DataFrame) -> str:
         f"_Generated {date.today().isoformat()} by `python -m edgar_extract.evaluate`._",
         "",
         f"A value counts as correct if it is within {TOLERANCE:.1%} of the XBRL ground truth. "
-        f"{graded['accession_number'].nunique()} filings, {len(graded) // max(graded['run'].nunique(), 1)} "
-        "graded values per model (metrics without ground truth are excluded).",
-        "",
-        "## Overall accuracy",
+        "Metrics without ground truth are excluded from the accuracy.",
         "",
     ]
+    if (evals["dataset"] == DEVELOPMENT).any():
+        lines.append(
+            f"- **Development:** {_dataset_summary(evals, DEVELOPMENT)}. "
+            "Prompts and code were tuned on these, so their accuracy is optimistic."
+        )
+    if (evals["dataset"] == TEST).any():
+        lines.append(
+            f"- **Held-out test:** {_dataset_summary(evals, TEST)}. "
+            "Added afterwards and never used for tuning."
+        )
+    lines += ["", "## Overall accuracy", ""]
 
-    runs = runs.copy()
-    runs["run"] = runs["model"] + " / " + runs["version"]
+    runs = _with_labels(runs)
     overall = []
-    for run, group in graded.groupby("run"):
-        r = runs[runs["run"] == run]
-        quotes = evals[(evals["run"] == run) & evals["quote_in_source"].notna()]["quote_in_source"]
+    for column in columns:
+        group = graded[graded["column"] == column]
+        if group.empty:
+            continue
+        r = runs[runs["column"] == column]
+        quotes = evals[(evals["column"] == column) & evals["quote_in_source"].notna()]["quote_in_source"]
         overall.append(
             {
-                "Model / version": run,
+                "Data set": group["set"].iloc[0],
+                "Model / version": group["run"].iloc[0],
                 "Accuracy": _pct(group["correct"]),
                 "Avg input tokens": f"{r['input_tokens'].mean():,.0f}",
                 "Avg output tokens": f"{r['output_tokens'].mean():,.0f}",
@@ -318,23 +359,34 @@ def build_report(evals: pd.DataFrame, runs: pd.DataFrame) -> str:
     lines += [_table(pd.DataFrame(overall)), ""]
 
     lines += ["## Accuracy per metric", ""]
-    per_metric = graded.pivot_table(index="metric", columns="run", values="correct", aggfunc=_pct)
-    per_metric = per_metric.reindex([m for m in METRIC_FIELDS.values() if m in per_metric.index])
-    lines += [_table(per_metric.reset_index().rename(columns={"metric": "Metric"})), ""]
+    per_metric = graded.pivot_table(index="metric", columns="column", values="correct", aggfunc=_pct)
+    per_metric = per_metric.reindex(
+        index=[m for m in METRIC_FIELDS.values() if m in per_metric.index],
+        columns=[c for c in columns if c in per_metric.columns],
+    )
+    lines += [_table(per_metric.fillna("—").reset_index().rename(columns={"metric": "Metric"})), ""]
 
     lines += ["## Accuracy per company", ""]
-    per_company = graded.pivot_table(index="ticker", columns="run", values="correct", aggfunc=_pct)
-    lines += [_table(per_company.reset_index().rename(columns={"ticker": "Company"})), ""]
+    per_company = graded.pivot_table(index=["set", "ticker"], columns="run", values="correct", aggfunc=_pct)
+    per_company = per_company.reindex(
+        index=sorted(per_company.index, key=lambda key: (list(DATASET_LABELS.values()).index(key[0]), key[1]))
+    )
+    per_company = per_company.fillna("—").reset_index().rename(columns={"set": "Data set", "ticker": "Company"})
+    lines += [_table(per_company), ""]
 
     lines += ["## Error categories", ""]
     errors = graded[~graded["correct"]]
-    counts = errors.pivot_table(index="category", columns="run", values="metric", aggfunc="count", fill_value=0)
-    counts = counts.reindex([c for c in CATEGORIES if c in counts.index])
+    counts = graded.assign(error=~graded["correct"]).pivot_table(
+        index="category", columns="column", values="error", aggfunc="sum", fill_value=0
+    )
+    counts = counts.reindex(
+        index=[c for c in CATEGORIES if c in counts.index], columns=[c for c in columns if c in counts.columns]
+    )
     counts.index = [CATEGORY_LABELS[c] for c in counts.index]
-    if counts.empty:
+    if errors.empty:
         lines += ["No errors.", ""]
     else:
-        lines += [_table(counts.reset_index().rename(columns={"index": "Category"})), ""]
+        lines += [_table(counts.astype(int).reset_index().rename(columns={"index": "Category"})), ""]
 
     lines += [
         "## Metrics the company does not report",
@@ -347,12 +399,14 @@ def build_report(evals: pd.DataFrame, runs: pd.DataFrame) -> str:
         lines += ["None.", ""]
     else:
         nt = no_truth.assign(answered=no_truth["category"] == NO_TRUTH_ANSWERED)
-        summary = nt.groupby("run")["answered"].agg(lambda s: f"{int(s.sum())} of {len(s)} answered anyway")
-        lines += [_table(summary.reset_index().rename(columns={"run": "Model / version", "answered": "Result"})), ""]
-        answered = nt[nt["answered"]].sort_values(["run", "ticker", "fiscal_year"])
+        summary = nt.groupby("column")["answered"].agg(lambda s: f"{int(s.sum())} of {len(s)} answered anyway")
+        summary = summary.reindex([c for c in columns if c in summary.index])
+        lines += [_table(summary.reset_index().rename(columns={"column": "Model / version · data set", "answered": "Result"})), ""]
+        answered = nt[nt["answered"]].sort_values(["set", "run", "ticker", "fiscal_year"])
         if not answered.empty:
             table = pd.DataFrame(
                 {
+                    "Data set": answered["set"],
                     "Model / version": answered["run"],
                     "Company": answered["ticker"],
                     "FY": answered["fiscal_year"],
@@ -367,9 +421,10 @@ def build_report(evals: pd.DataFrame, runs: pd.DataFrame) -> str:
     if errors.empty:
         lines += ["None.", ""]
     else:
-        detail = errors.sort_values(["run", "ticker", "fiscal_year", "metric"])
+        detail = errors.sort_values(["set", "run", "ticker", "fiscal_year", "metric"])
         table = pd.DataFrame(
             {
+                "Data set": detail["set"],
                 "Model / version": detail["run"],
                 "Company": detail["ticker"],
                 "FY": detail["fiscal_year"],
@@ -388,11 +443,12 @@ def build_report(evals: pd.DataFrame, runs: pd.DataFrame) -> str:
 def load_runs(db_path: Path = db.DB_PATH) -> pd.DataFrame:
     with db.connect(db_path) as conn:
         rows = conn.execute(
-            "SELECT model, version, input_tokens, output_tokens, duration_s, cost_usd, format_issues "
-            "FROM extraction_runs"
+            "SELECT r.model, r.version, r.input_tokens, r.output_tokens, r.duration_s, r.cost_usd, r.format_issues, f.ticker "
+            "FROM extraction_runs r JOIN filings f USING (accession_number)"
         ).fetchall()
     df = pd.DataFrame([dict(r) for r in rows])
     df["format_issue_count"] = df["format_issues"].map(lambda s: len(json.loads(s)))
+    df["dataset"] = df["ticker"].map(dataset_of)
     return df
 
 
@@ -406,9 +462,9 @@ def main() -> None:
     path.write_text(report, encoding="utf-8")
 
     graded = evals[evals["truth"].notna()]
-    for (model, version), group in graded.groupby(["model", "version"]):
+    for (dataset, model, version), group in graded.groupby(["dataset", "model", "version"]):
         correct = (group["category"] == CORRECT).sum()
-        print(f"{model} / {version}: {correct}/{len(group)} correct ({correct / len(group):.0%})")
+        print(f"{DATASET_LABELS[dataset]:13} {model} / {version}: {correct}/{len(group)} correct ({correct / len(group):.0%})")
     print(f"\nReport written to {path.relative_to(PROJECT_ROOT)}")
 
 

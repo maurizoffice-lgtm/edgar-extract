@@ -14,6 +14,7 @@ import pandas as pd
 DEFAULT_DB_PATH = Path(__file__).resolve().parents[1] / "data" / "dashboard.db"
 
 METRICS = ["Revenue", "OperatingIncome", "NetIncome", "EPS", "TotalAssets"]
+DATASETS = {"test": "Held-out test", "development": "Development"}
 CORRECT = "correct"
 NO_TRUTH = ("no_truth_answered", "no_truth_null")
 CATEGORY_LABELS = {
@@ -49,7 +50,7 @@ def load_evaluations(db_path: Path = DEFAULT_DB_PATH) -> pd.DataFrame:
 
 
 def load_runs(db_path: Path = DEFAULT_DB_PATH) -> pd.DataFrame:
-    df = _query(db_path, "SELECT * FROM extraction_runs")
+    df = _query(db_path, "SELECT r.*, f.dataset FROM extraction_runs r JOIN filings f USING (accession_number)")
     df["format_issue_count"] = df["format_issues"].map(lambda s: len(json.loads(s)))
     df["run"] = [run_label(m, v) for m, v in zip(df["model"], df["version"])]
     return df

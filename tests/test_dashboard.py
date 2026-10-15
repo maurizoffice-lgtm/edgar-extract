@@ -38,7 +38,7 @@ def dashboard_db(tmp_path):
         ]
         for model, metric, truth, value, usd, category in rows:
             conn.execute(
-                "INSERT INTO evaluations VALUES ('acc-1', ?, 'v1', 'AAPL', 2025, ?, ?, ?, 'millions', ?, ?, '', 'q', 1)",
+                "INSERT INTO evaluations VALUES ('acc-1', ?, 'v1', 'AAPL', 2025, ?, ?, ?, 'millions', ?, ?, '', 'q', 1, 'development')",
                 (model, metric, truth, value, usd, category),
             )
     target = tmp_path / "dashboard.db"
@@ -53,8 +53,10 @@ def test_export_copies_tables_without_raw_responses(dashboard_db):
     conn = sqlite3.connect(target)
     columns = [r[1] for r in conn.execute("PRAGMA table_info(extraction_runs)")]
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    datasets = [r[0] for r in conn.execute("SELECT dataset FROM filings")]
     conn.close()
     assert "raw_response" not in columns
+    assert datasets == ["development"]  # AAPL was used for development
     assert "preprocessing" not in tables  # contains local file paths
 
 

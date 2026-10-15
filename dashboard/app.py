@@ -27,11 +27,8 @@ def load() -> tuple[pd.DataFrame, pd.DataFrame]:
     return data.load_evaluations(), data.load_runs()
 
 
-evals, runs = load()
-summary = data.run_summary(evals, runs)
-models = sorted(evals["model"].unique())  # fixed order -> each model always keeps its color
-versions = sorted(evals["version"].unique())
-latest = versions[-1]
+all_evals, all_runs = load()
+models = sorted(all_evals["model"].unique())  # fixed order -> each model always keeps its color
 mode = theme_type()
 model_scale = alt.Scale(domain=models, range=SERIES_COLORS[mode][: len(models)])
 
@@ -60,8 +57,31 @@ def grouped_accuracy_bars(df: pd.DataFrame, x: str, x_title: str, offset: str, s
 st.title("edgar-extract")
 st.caption(
     "How accurately do free local LLMs extract five metrics from SEC 10-K filings? "
-    f"Every value is checked against XBRL data (0.5 % tolerance). {evals['accession_number'].nunique()} filings, "
-    f"{evals['ticker'].nunique()} companies, models: {', '.join(models)}."
+    f"Every value is checked against XBRL data (0.5 % tolerance). {all_evals['accession_number'].nunique()} filings, "
+    f"{all_evals['ticker'].nunique()} companies, models: {', '.join(models)}."
+)
+
+# Development companies were used to tune prompts and code; held-out companies never were.
+datasets = [d for d in data.DATASETS if d in set(all_evals["dataset"])]
+dataset = st.radio(
+    "Data set",
+    datasets,
+    horizontal=True,
+    key="dataset",
+    format_func=lambda d: (
+        f"{data.DATASETS[d]} ({all_evals.loc[all_evals['dataset'] == d, 'ticker'].nunique()} companies, "
+        f"{all_evals.loc[all_evals['dataset'] == d, 'accession_number'].nunique()} filings)"
+    ),
+    help="Development: the companies the prompts and code were tuned on (optimistic). "
+    "Held-out test: companies added afterwards and never used for tuning.",
+)
+evals = all_evals[all_evals["dataset"] == dataset]
+runs = all_runs[all_runs["dataset"] == dataset]
+summary = data.run_summary(evals, runs)
+versions = sorted(evals["version"].unique())
+latest = versions[-1]
+dev_summary = data.run_summary(
+    all_evals[all_evals["dataset"] == "development"], all_runs[all_runs["dataset"] == "development"]
 )
 
 # A radio (not st.tabs) remembers the open view when a table selection reruns the app,
@@ -75,14 +95,20 @@ if view == "Overview":
     columns = st.columns(len(models))
     for column, model in zip(columns, models):
         row = summary[(summary["model"] == model) & (summary["version"] == latest)].iloc[0]
-        first = summary[(summary["model"] == model) & (summary["version"] == versions[0])].iloc[0]
+        # Held-out data has only the latest version: compare with development instead.
+        if len(versions) > 1:
+            first = summary[(summary["model"] == model) & (summary["version"] == versions[0])].iloc[0]
+            delta_label = f"vs {versions[0]}"
+        else:
+            first = dev_summary[(dev_summary["model"] == model) & (dev_summary["version"] == latest)].iloc[0]
+            delta_label = "vs development"
         with column:
             st.markdown(f"**{model}**")
             a, b, c = st.columns(3)
             a.metric(
                 "Accuracy",
                 f"{row['accuracy']:.0%}",
-                f"{(row['accuracy'] - first['accuracy']) * 100:+.0f} pp vs {versions[0]}",
+                f"{(row['accuracy'] - first['accuracy']) * 100:+.0f} pp {delta_label}",
             )
             b.metric("Seconds / filing", f"{row['seconds_per_filing']:.1f}")
             c.metric("Cost / filing", f"${row['cost_per_filing']:.2f}")

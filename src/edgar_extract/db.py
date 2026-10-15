@@ -116,9 +116,16 @@ CREATE TABLE IF NOT EXISTS evaluations (
     detail           TEXT NOT NULL,
     quote            TEXT NOT NULL,
     quote_in_source  INTEGER,  -- 1/0, NULL if no value was given
+    dataset          TEXT NOT NULL,  -- "development" or "test" (held out), see datasets.py
     PRIMARY KEY (accession_number, model, version, metric)
 );
 """
+
+# Columns added after the first release: CREATE TABLE IF NOT EXISTS does not add them
+# to an existing database, so add them here. (table, column, definition)
+ADDED_COLUMNS = [
+    ("evaluations", "dataset", "TEXT NOT NULL DEFAULT 'development'"),
+]
 
 
 @contextmanager
@@ -129,11 +136,19 @@ def connect(path: Path = DB_PATH) -> Iterator[sqlite3.Connection]:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(SCHEMA)
+    _add_missing_columns(conn)
     try:
         yield conn
         conn.commit()
     finally:
         conn.close()
+
+
+def _add_missing_columns(conn: sqlite3.Connection) -> None:
+    for table, column, definition in ADDED_COLUMNS:
+        existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
 def save_filing(conn: sqlite3.Connection, ticker: str, filing: Filing) -> None:
@@ -265,7 +280,7 @@ def save_extraction(
 
 EVALUATION_COLUMNS = [
     "accession_number", "model", "version", "ticker", "fiscal_year", "metric", "truth",
-    "value", "unit", "value_usd", "category", "detail", "quote", "quote_in_source",
+    "value", "unit", "value_usd", "category", "detail", "quote", "quote_in_source", "dataset",
 ]  # fmt: skip
 
 
