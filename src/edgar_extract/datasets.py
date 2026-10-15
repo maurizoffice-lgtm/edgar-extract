@@ -5,13 +5,16 @@ their accuracy is optimistic. The test companies were added afterwards to show h
 the pipeline works on unseen companies.
 
 Test set 1 was used to find the error types that v4 targets, so from v4 on it is "seen"
-as well. Test set 2 was added only after v4 had been written and is the honest measure
-for v4; it must never be used to tune anything.
+as well. Test set 2 was added only after v4 had been written and was the honest measure
+for v4; its errors were then studied for v5, so from v5 on it is "seen" too. Test set 3
+was chosen before v5 was written and is the honest measure for v5; it must never be used
+to tune anything.
 """
 
 DEVELOPMENT = "development"
 TEST = "test"  # test set 1 (held out until v3; its errors were studied for v4)
-TEST2 = "test2"  # test set 2 (held out; added for v4)
+TEST2 = "test2"  # test set 2 (held out until v4; its errors were studied for v5)
+TEST3 = "test3"  # test set 3 (held out; added for v5)
 
 DEVELOPMENT_TICKERS = ["AAPL", "MSFT", "JNJ", "JPM", "XOM"]
 DEVELOPMENT_COUNT = 2  # latest 10-Ks per company
@@ -34,17 +37,30 @@ TEST2_TICKERS = [
 ]  # fmt: skip
 TEST2_COUNT = 5
 
-DATASETS = [DEVELOPMENT, TEST, TEST2]
+# Chosen before v5 was written: banks and insurers that show net income "applicable/available
+# to common shareholders" (MS, WFC, MET, SCHW), companies with noncontrolling interests, some
+# in several rows (BX, KKR, GM, KMI), companies without an operating income line (MRK, BMY,
+# HON, IBM) — the three error types v5 targets — and ordinary cases with fiscal years ending
+# in January/February (TGT), July (CSCO) and November/December (ADBE).
+TEST3_TICKERS = [
+    "MS", "WFC", "MET", "SCHW", "BX", "KKR", "GM", "KMI", "MRK", "BMY",
+    "HON", "IBM", "TGT", "CSCO", "ADBE",
+]  # fmt: skip
+TEST3_COUNT = 5
+
+DATASETS = [DEVELOPMENT, TEST, TEST2, TEST3]
 
 
 def dataset_of(ticker: str) -> str:
-    """Data set of a company. Any company not listed is unseen, like test set 2."""
+    """Data set of a company. Any company not listed is unseen, like test set 3."""
     ticker = ticker.upper()
     if ticker in DEVELOPMENT_TICKERS:
         return DEVELOPMENT
     if ticker in TEST_TICKERS:
         return TEST
-    return TEST2
+    if ticker in TEST2_TICKERS:
+        return TEST2
+    return TEST3
 
 
 def default_selection() -> list[tuple[str, int]]:
@@ -53,6 +69,7 @@ def default_selection() -> list[tuple[str, int]]:
         [(t, DEVELOPMENT_COUNT) for t in DEVELOPMENT_TICKERS]
         + [(t, TEST_COUNT) for t in TEST_TICKERS]
         + [(t, TEST2_COUNT) for t in TEST2_TICKERS]
+        + [(t, TEST3_COUNT) for t in TEST3_TICKERS]
     )
 
 

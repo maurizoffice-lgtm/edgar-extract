@@ -14,9 +14,9 @@ import pandas as pd
 DEFAULT_DB_PATH = Path(__file__).resolve().parents[1] / "data" / "dashboard.db"
 
 METRICS = ["Revenue", "OperatingIncome", "NetIncome", "EPS", "TotalAssets"]
-DATASETS = {"test2": "Test set 2", "test": "Test set 1", "development": "Development"}
+DATASETS = {"test3": "Test set 3", "test2": "Test set 2", "test": "Test set 1", "development": "Development"}
 # Notes in format_issues that are corrections made by code (see edgar_extract.extract), not format problems.
-CODE_CORRECTIONS = (":noncontrolling_removed", ":filled_from_row")
+CODE_CORRECTIONS = (":noncontrolling_removed", ":filled_from_row", ":common_adjustments_removed", ":pretax_removed")
 CORRECT = "correct"
 NO_TRUTH = ("no_truth_answered", "no_truth_null")
 CATEGORY_LABELS = {

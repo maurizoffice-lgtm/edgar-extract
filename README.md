@@ -3,12 +3,12 @@
 > How accurately can a small, free LLM pull five financial metrics out of an SEC 10-K?
 > This project measures it against the companies' own XBRL data, explains every error,
 > and improves the pipeline measurably — from **75 % to 100 %** on the development set for a
-> 2-billion-parameter model running on a laptop, at a cost of **$0**. On **15 companies added
-> only after the latest version was written**, the 2b model scores **95 %** (v3: 88 %) and the
-> 4b model **97 %** (v3: 95 %).
+> 2-billion-parameter model running on a laptop, at a cost of **$0**. On **13 companies chosen
+> before the latest version was written**, the 2b model scores **97 %** (v4: 94 %) and the
+> 4b model **98 %** (v4: 97 %).
 
-**Status:** ✅ development set (5 companies × 2 years) + two held-out test sets
-(20 + 15 companies × 5 years, 175 filings) · pipeline v4.
+**Status:** ✅ development set (5 companies × 2 years) + three held-out test sets
+(20 + 15 + 13 companies × 5 years, 240 filings) · pipeline v5.
 
 ![Dashboard overview: accuracy by model and version](docs/dashboard-overview.jpg)
 
@@ -43,7 +43,7 @@ flowchart LR
     H --> D
     X --> G["ground_truth.py<br/>match by accession number<br/>+ fiscal-year end"]
     D --> P["preprocess.py<br/>HTML → text<br/>keep income statement<br/>+ balance sheet (0.9 %)"]
-    P --> E["extract.py + llm.py<br/>tool call: value · unit · quote<br/>v3: scale read in code<br/>v4: loss rows + net income checked in code"]
+    P --> E["extract.py + llm.py<br/>tool call: value · unit · quote<br/>v3: scale read in code<br/>v4: loss rows + net income checked in code<br/>v5: common-shareholder rows, several<br/>noncontrolling rows, no pre-tax guesses"]
     O["Ollama (local)<br/>qwen3.5:4b · qwen3.5:2b"] <--> E
     G --> DB[("SQLite<br/>data/edgar.db")]
     P --> DB
@@ -61,7 +61,7 @@ never downloads or computes anything twice.
 
 ## Results
 
-Three data sets (defined in [`datasets.py`](src/edgar_extract/datasets.py)):
+Four data sets (defined in [`datasets.py`](src/edgar_extract/datasets.py)):
 
 - **Development:** AAPL, MSFT, JNJ, JPM, XOM × latest 2 10-Ks. Every prompt rule and code
   change up to v3 was made while looking at these filings — so their scores are optimistic.
@@ -72,10 +72,60 @@ Three data sets (defined in [`datasets.py`](src/edgar_extract/datasets.py)):
 - **Test set 2:** 15 companies chosen *before* v4 was run on them and never used for
   tuning, × latest 5 10-Ks — INTC, T, CMCSA, UBER, WBD, MRNA, F, DUK (several with losses
   or noncontrolling interests), AIG (insurer), GS (bank), COST (fiscal year ends in
-  August/September), ORCL and NKE (May), LLY, LMT. **This is the honest measure for v4.**
+  August/September), ORCL and NKE (May), LLY, LMT. The honest measure for v4; its errors
+  were then used to design v5, so it is **no longer unseen** either.
+- **Test set 3:** 15 companies chosen *before* v5 was written and never used for tuning,
+  × latest 5 10-Ks — MS, SCHW (bank/broker), MET (insurer), BX, KKR, GM, KMI (noncontrolling
+  interests, some in several rows), MRK, BMY, HON (no operating income line), TGT (fiscal year
+  ends in January), CSCO (July), ADBE (November/December), plus WFC and IBM. WFC and IBM put
+  their financial statements in an exhibit instead of the main 10-K, which the pipeline does
+  not read yet, so their 10 filings were not extracted: **65 filings from 13 companies.
+  This is the honest measure for v5.**
 
 A value is correct if it is within 0.5 % of the XBRL value. Metrics a company does not
 report (no ground truth) are not graded.
+
+### v5: fixing the three error types left on test set 2
+
+| Model / version | Development (44) | Test set 1 (470) | Test set 2 (351) | **Test set 3 (281)** | Test set 3, values printed in the statements (276) |
+|---|---|---|---|---|---|
+| qwen3.5:2b / v4 | 100 % | 97 % | 95 % | 94 % (264) | 96 % (264) |
+| qwen3.5:2b / **v5** | **100 %** | **97 %** | **97 %** | **97 % (273)** | **99 % (273)** |
+| qwen3.5:4b / v4 | 100 % | 97 % | 97 % | 97 % (273) | 99 % (273) |
+| qwen3.5:4b / **v5** | **100 %** | **98 %** | **99 %** | **98 % (275)** | **>99 % (275)** |
+
+v5 = v4 + three checks in code. The prompt is unchanged, so v5 reuses v4's cached model
+answers: it costs no extra model time. Each check is a general rule and only fires where the
+numbers prove it:
+
+1. **Several noncontrolling rows:** some statements split the noncontrolling interests into a
+   regular and a "redeemable" row. The net income check now also accepts *group = company +
+   sum of all noncontrolling rows*.
+2. **"Applicable to common shareholders":** below net income, banks and companies with
+   preferred stock subtract preferred dividends and show net income "applicable/available to
+   common shareholders". If the model picked that row, code takes the net income row above it,
+   but only if *company = common + the rows in between* adds up and no noncontrolling row
+   lies in between.
+3. **No "income before taxes" as operating income:** if every income-statement row showing
+   the model's operating income is an income-before-taxes row ("before … tax", "pre-tax")
+   and none is labeled operating, the value is removed.
+
+On the unseen **test set 3** the 2b model's errors drop from 17 to 8 (Blackstone and KKR:
+two noncontrolling rows) and the 4b model's from 8 to 6. Guessed operating incomes where the
+company reports none drop to **0** on every data set (test set 3: 2b 3 → 0, 4b 7 → 0 of 36).
+**No value that v4 had right is wrong in v5**, on any data set.
+
+What is left on test set 3 (v5):
+
+- **Ground-truth artifacts (5 values per model):** Honeywell and MetLife (2024, 2025) report
+  no operating income line, but XBRL has an `OperatingIncomeLoss` value from elsewhere in the
+  filing. The models correctly leave it empty, and it is graded as "missing". KKR 2025 splits its
+  income statement over two pages; preprocessing keeps only the second page, which has no
+  revenue. The last column leaves these 5 values out.
+- 2b: KKR 2025 left empty, and one Merck EPS left empty.
+- 4b: General Motors 2023 net income "attributable to common stockholders". The difference
+  is not printed as a row in between, so the check (rightly) does not fire.
+- Code corrections are applied a lot: on test set 3, v5 corrected 41 values for 2b and 18 for 4b.
 
 ### v4: fixing the two error types found on test set 1
 
@@ -107,15 +157,15 @@ What v4 did **not** fix, or made worse (test set 2 unless stated):
 
 - **Two noncontrolling rows:** Warner Bros. Discovery splits noncontrolling interests into a
   regular and a "redeemable" row. The check only knows one row, so it does not fire (5 errors
-  for 2b, 4 for 4b). Fixing it now would make test set 2 "seen" — it is listed under next steps.
+  for 2b, 4 for 4b). Fixed in v5.
 - **More guessing where nothing is reported:** with the new prompt the models fill in
   "income before taxes" as operating income a little more often for companies that report
   no operating income (4b: 9 → 12 of 24 on test set 2; 2b: 5 → 7). The code fallback does
-  not do this — the label must say "from operations" or "operating".
+  not do this — the label must say "from operations" or "operating". Fixed in v5.
 - 3 values that v3 had right are wrong in v4 (an EPS left empty or taken from a different
   line) — small changes in the prompt change the model's answers elsewhere, too.
 - Remaining real errors on test set 2: net income "applicable to common shareholders"
-  (Goldman Sachs, AT&T), EPS from continuing operations or left empty (AIG), one Intel net
+  (Goldman Sachs, AT&T; fixed in v5), EPS from continuing operations or left empty (AIG), one Intel net
   income that still includes noncontrolling interests, and one AT&T filing whose table
   header gives no scale (2 unit errors).
 - **Ground-truth artifact:** Duke Energy's XBRL revenue is a note value
@@ -173,6 +223,7 @@ filing whose income-statement header states no scale, so the model's unit is use
 | **v2** | v1 + a block of *general* rules in the prompt (no company names, no expected numbers). | 77 % (34/44) | 100 % (44/44) |
 | **v3** | v2 + the scale (thousands/millions) is read from the table header **in code**; the model's unit is ignored. Same LLM answers as v2, straight from the cache. | 95 % (42/44) | 100 % (44/44) |
 | **v4** | v3 + a prompt rule for loss rows, empty loss rows filled in code, net income checked against noncontrolling interests in code (see above). | **100 % (44/44)** | **100 % (44/44)** |
+| **v5** | v4 + three checks in code: several noncontrolling rows, "applicable to common shareholders", no income before taxes as operating income (see above). Same LLM answers as v4. | **100 % (44/44)** | **100 % (44/44)** |
 
 Errors per category (graded values only):
 
@@ -227,6 +278,8 @@ ground truth, so they are reported separately and not counted in the accuracy.
 
 - v2 rule *"income before income taxes is NOT operating income; otherwise null"* →
   2b: 4 of 6 guessed → **0**. 4b still guesses 2 of 6 (J&J both years).
+- On the test sets the guessing came back, slightly more often with the v4 prompt. v5 checks it
+  in code (the row behind the value is an income-before-taxes row) → **0** guesses on all data sets.
 
 ### 5. Format: numbers as text
 The 2b model often filled the numeric field with text such as `"416,161"`. The parser
@@ -243,6 +296,18 @@ row. Result on the unseen test set 2: 2b 88 % → 95 %, 4b 95 % → 97 %.
 
 **Lesson (again):** a rule in the prompt is a suggestion to a small model; a rule in code is
 applied every time — but only where the numbers prove it (group = noncontrolling + company).
+
+### 7. "Applicable to common shareholders" and several noncontrolling rows (v5)
+Test set 2 showed three leftovers: Warner Bros. Discovery's two noncontrolling rows, net
+income "applicable to common shareholders" (Goldman Sachs, AT&T) and guessed operating
+incomes. v5 handles all three in code, again only where the arithmetic adds up. On the unseen
+test set 3 the two noncontrolling rows turned out to matter most: Blackstone and KKR have a
+"redeemable" noncontrolling row as well (9 of the 2b model's 17 v4 errors).
+
+One mistake on the way, caught by the measurement: the first version of the
+several-rows check changed v4's own results, because v4 uses the same function. Now the new
+rule is switched on per version (`sum_noncontrolling`). Every version reproduces its old
+numbers from the cache.
 
 ### Preprocessing pitfalls found on the way
 - A statement title such as "Consolidated Balance Sheets" appears dozens of times in one
@@ -273,6 +338,18 @@ applied every time — but only where the numbers prove it (group = noncontrolli
   - AIG has a quarterly table titled like the income statement, with more numbers. Tables
     with "Three Months Ended" in their header are now skipped.
   - Coverage on test set 2: 346/351; the 5 misses are Duke Energy's revenue (see above).
+- **Test set 3 found four more** (fixed before any model saw these filings where possible;
+  all 185 earlier texts stayed byte-identical):
+  - Schwab titles its balance sheet "Consolidated Balance Sheets (1)". The footnote marker
+    made the title look like a sentence; it is now ignored.
+  - Merck prints total assets and total liabilities and equity without a label ("$117,106").
+    The balance sheet is now also recognized by "Total current assets/liabilities".
+  - Wells Fargo and IBM put their financial statements in an exhibit (the annual report to
+    shareholders), not in the main 10-K. These filings are now skipped instead of sending
+    the whole 10-K to the model (see next steps).
+  - KKR 2025 splits its income statement over two pages with the same title, and only the
+    second page is kept (1 revenue value missing; not fixed).
+  - Coverage on test set 3: 276/281 (the 5 misses are listed above).
 - In 2026 ExxonMobil moved its ticker to a new holding company without 10-Ks yet; its
   filings are found under the predecessor's CIK.
 
@@ -284,7 +361,8 @@ applied every time — but only where the numbers prove it (group = noncontrolli
 | qwen3.5:4b | 3,216 | 309 | 15.4 s | $0 |
 
 \* Apple M1 Pro, 16 GB, Ollama 0.40, v4, all 185 filings. The v4 run took ~48 min (4b) +
-~20 min (2b). The code checks of v4 add no measurable time.
+~20 min (2b). The code checks of v4 and v5 add no measurable time; test set 3 (65 filings)
+took ~16 min (4b) + ~7 min (2b).
 
 - **Preprocessing does the heavy lifting:** the 185 full 10-Ks are ~23.4 million tokens
   (estimated), the two statements sent to the model ~203,000 (0.9 %).
@@ -295,14 +373,17 @@ applied every time — but only where the numbers prove it (group = noncontrolli
 
 ## Limitations
 
-- **Test set 1 is "used", test set 2 is now the only unseen set.** Fixing the Warner Bros.
-  Discovery case (two noncontrolling rows) would use it up, too; the next fix needs a third set.
-- Test set 2 was chosen with several loss and noncontrolling-interest companies on purpose,
-  to test v4 where it matters. Its scores are therefore not a random sample of all companies.
+- **Test sets 1 and 2 are "used", test set 3 is now the only unseen set.** The next fix
+  needs a fourth set.
+- Test sets 2 and 3 were chosen with companies that have the targeted problems on purpose
+  (losses, noncontrolling interests, preferred dividends, no operating income line), to test
+  each version where it matters. Their scores are therefore not a random sample of all companies.
+- Companies that put their statements in an exhibit (Wells Fargo, IBM) are not covered yet.
 - The preprocessing fixes above were made after looking at held-out filings (but before any
   model saw them, and without touching prompts). They are general rules, not company names.
-- The v4 code checks rely on common row labels and on the model finding revenue; a filing
-  whose loss rows use unusual labels is not filled.
+- The v4/v5 code checks rely on common row labels and on the model finding revenue; a filing
+  whose loss rows use unusual labels is not filled. The checks only fire where the printed
+  numbers add up — a difference that is not printed as a row (GM 2023) is left alone.
 - Large US companies only. Netflix confirms the thousands scale; billions is covered by
   unit tests only.
 - Ground truth can disagree with the statement (Disney, NextEra above), and some companies
@@ -316,14 +397,12 @@ applied every time — but only where the numbers prove it (group = noncontrolli
 
 ## Next steps
 
-1. Net income check for *several* noncontrolling rows (Warner Bros. Discovery) and for
-   "applicable to common shareholders" — measured on a **third** set of unseen companies.
-2. Stop the guessing of "income before taxes" as operating income that the v4 prompt made
-   slightly more frequent.
-3. Keep empty table cells / the note column in preprocessing so columns line up
+1. Read the financial statements from an exhibit when the main 10-K has none (Wells Fargo,
+   IBM), and join income statements split over two pages (KKR 2025).
+2. Keep empty table cells / the note column in preprocessing so columns line up
    (root cause of error 3), and measure it as its own version.
-4. Stricter quote check: the quote must contain the reported number.
-5. Optionally compare against a hosted model.
+3. Stricter quote check: the quote must contain the reported number.
+4. Optionally compare against a hosted model.
 
 ## Getting started
 
@@ -352,13 +431,13 @@ ollama serve                    # keep running in a second terminal
 ollama pull qwen3.5:4b
 ollama pull qwen3.5:2b
 
-python -m edgar_extract.download           # 10-K documents -> data/cache/ (40 companies, see datasets.py)
+python -m edgar_extract.download           # 10-K documents -> data/cache/ (55 companies, see datasets.py)
 python -m edgar_extract.ground_truth       # XBRL ground truth -> data/edgar.db
 python -m edgar_extract.preprocess         # income statement + balance sheet only
-python -m edgar_extract.extract --version v4   # also try --version v1 / v2 / v3
+python -m edgar_extract.extract --version v5   # also try --version v1 / v2 / v3 / v4
 python -m edgar_extract.evaluate           # -> reports/evaluation.md
 python -m edgar_extract.export_dashboard   # -> data/dashboard.db
-pytest                                     # 109 tests, no network needed
+pytest                                     # 128 tests, no network needed
 ```
 
 ### Deploy the dashboard
@@ -372,10 +451,10 @@ branch `main`, main file `dashboard/app.py`. Dependencies come from
 ```
 src/edgar_extract/
   edgar.py, download.py     SEC client: ticker → CIK → 10-K list → document (cached, rate-limited)
-  datasets.py               development companies and test sets 1 and 2
+  datasets.py               development companies and test sets 1–3
   ground_truth.py           XBRL companyfacts → ground truth per filing
   preprocess.py             HTML → text, find income statement + balance sheet
-  llm.py, extract.py        Ollama client (cached) and the extraction versions v1–v4
+  llm.py, extract.py        Ollama client (cached) and the extraction versions v1–v5
   evaluate.py               grading, error categories, Markdown report
   export_dashboard.py       public copy of the results for the dashboard
   db.py, config.py          SQLite schema and settings

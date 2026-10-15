@@ -61,7 +61,7 @@ st.caption(
     f"{all_evals['ticker'].nunique()} companies, models: {', '.join(models)}."
 )
 
-# Development companies were used to tune prompts and code; test set 2 never was.
+# Development companies were used to tune prompts and code; test set 3 never was.
 datasets = [d for d in data.DATASETS if d in set(all_evals["dataset"])]
 dataset = st.radio(
     "Data set",
@@ -72,7 +72,8 @@ dataset = st.radio(
         f"{data.DATASETS[d]} ({all_evals.loc[all_evals['dataset'] == d, 'ticker'].nunique()} companies, "
         f"{all_evals.loc[all_evals['dataset'] == d, 'accession_number'].nunique()} filings)"
     ),
-    help="Test set 2: companies added after v4 was written, never used for tuning (the honest measure). "
+    help="Test set 3: companies chosen before v5 was written, never used for tuning (the honest measure). "
+    "Test set 2: held out until v4; its errors were studied to build v5. "
     "Test set 1: held out until v3; its errors were studied to build v4. "
     "Development: the companies the prompts and code were tuned on (optimistic).",
 )
@@ -117,7 +118,9 @@ if view == "Overview":
     st.subheader("Accuracy by version")
     st.caption(
         "v1: first prompt · v2: prompt with general rules · v3: v2 + unit read from the table header in code · "
-        "v4: v3 + rule for loss rows + empty values filled and net income checked in code"
+        "v4: v3 + rule for loss rows + empty values filled and net income checked in code · "
+        "v5: v4 + income before taxes removed as operating income, net income for common shareholders "
+        "and several noncontrolling rows corrected in code"
     )
     st.altair_chart(grouped_accuracy_bars(summary, "version", "Version", "model", model_scale), width="stretch")
 
@@ -137,7 +140,8 @@ if view == "Overview":
             "seconds_per_filing": st.column_config.NumberColumn("Sec / filing", format="%.1f"),
             "format_issues": st.column_config.NumberColumn("Format issues", help="Answers that did not follow the form, e.g. numbers as text"),
             "code_corrections": st.column_config.NumberColumn(
-                "Code corrections", help="Values corrected in code (v4: empty loss rows filled, noncontrolling interests removed)"
+                "Code corrections", help="Values corrected in code (v4: empty loss rows filled, noncontrolling interests removed; "
+                "v5: also income before taxes removed as operating income, common-shareholder deductions removed)"
             ),
             "cost_per_filing": "Cost / filing",
         },

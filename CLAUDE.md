@@ -65,8 +65,8 @@ Preprocessing findings (Phase 3):
 7. README — problem, Mermaid architecture, results, top errors, cost per filing, how to run (done)
 
 Scope: development set AAPL, MSFT, JNJ, JPM, XOM × last 2 10-Ks; test set 1 (20 companies ×
-last 5 10-Ks, seen since v4) and test set 2 (15 companies × 5, unseen) in `datasets.py`.
-Never tune prompts or code on test set 2.
+last 5 10-Ks, seen since v4), test set 2 (15 companies × 5, seen since v5) and test set 3
+(15 companies × 5, unseen) in `datasets.py`. Never tune prompts or code on test set 3.
 
 ## Tech stack
 Python 3.11+, venv + pip (pyproject.toml), httpx, BeautifulSoup + lxml, Ollama (local LLMs), pydantic,
@@ -182,6 +182,34 @@ Version 4 (targets the two 2b error types of test set 1; measured on test set 2)
   earlier texts byte-identical): "Net (loss) income" counts as a net income word (MRNA), and
   statements with "three months ended"/"quarter" in their header are skipped (AIG 2024).
 
+Version 5 (targets the three v4 error types left on test set 2; measured on test set 3):
+- `datasets.py`: TEST3 = test set 3 (15 companies × 5, confirmed by the author before v5 was
+  written: MS, WFC, MET, SCHW, BX, KKR, GM, KMI, MRK, BMY, HON, IBM, TGT, CSCO, ADBE). Unknown
+  tickers now count as TEST3. Test set 2 is "seen" since v5. Never tune on test set 3.
+- v5 = v4 prompt (LLM answers reused from the cache) + three code checks, each a `Version` flag:
+  `drop_pretax` (OperatingIncome removed if every row showing it is "before … tax"/"pre-tax"
+  and none is operating; runs before `fill_missing`), `check_common` (net income "…common…"
+  replaced by the net income row above it if company = common + rows in between, no
+  noncontrolling row in between; runs before the noncontrolling check) and
+  `sum_noncontrolling` (the noncontrolling check may add up several noncontrolling rows).
+  Notes: "NetIncome:common_adjustments_removed", "OperatingIncome:pretax_removed".
+- Pitfall: the several-rows change first went into `remove_noncontrolling` for all versions and
+  silently changed v4's results (test set 2 2b 335 → 340). Every behavior change needs its own
+  version flag; after any change, check that the old versions reproduce their numbers.
+- Results v4 → v5: dev 100 % both. Test set 1: 2b 97 → 97 % (456 → 457), 4b 97 → 98 %.
+  Test set 2: 2b 95 → 97 %, 4b 97 → 99 %. Test set 3 (unseen, 281 graded): 2b 94 → 97 %
+  (264 → 273), 4b 97 → 98 % (273 → 275). No v4-correct value became wrong. Guessed operating
+  income (no ground truth) → 0 on all sets (test set 3: 2b 3 → 0, 4b 7 → 0 of 36).
+- Test set 3 findings: BX and KKR have a "redeemable" noncontrolling row (9 of 2b's 17 v4
+  errors). Ground-truth artifacts: HON and MET 2024/2025 OperatingIncome (no such line in the
+  statement). GM 2023 "attributable to common stockholders" is not fixed (no printed row in between).
+- Preprocessing before the test-set-3 extraction (185 earlier texts byte-identical): footnote
+  marker in titles ("Consolidated Balance Sheets (1)", SCHW), balance sheet with unlabeled
+  totals ("Total current assets/liabilities", MRK). WFC and IBM have their statements in an
+  exhibit (EX-13), not in the main document → `extract` skips filings whose preprocessing
+  method is not "sections", and the report lists them as "Not extracted". KKR 2025: income
+  statement split over two pages, only the "(CONTINUED)" page is kept (revenue missing).
+
 ## Layout
 ```
 src/edgar_extract/   # package code
@@ -215,7 +243,7 @@ python -m edgar_extract.download
 python -m edgar_extract.ground_truth
 python -m edgar_extract.preprocess
 ollama serve &                                   # local LLMs
-python -m edgar_extract.extract --version v4
+python -m edgar_extract.extract --version v5
 python -m edgar_extract.evaluate                 # writes reports/evaluation.md
 python -m edgar_extract.export_dashboard         # writes data/dashboard.db (committed)
 streamlit run dashboard/app.py

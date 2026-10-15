@@ -8,17 +8,25 @@ import pytest
 
 from edgar_extract import db
 from edgar_extract.extract import (
+    COMMON_CORRECTED,
     NONCONTROLLING_CORRECTED,
+    PRETAX_REMOVED,
+    VERSIONS,
+    MetricAnswer,
+    apply_common_check,
     apply_detected_units,
+    apply_noncontrolling_check,
     build_prompt,
     detect_scales,
     build_tool,
+    drop_pretax,
     extract_filing,
     fill_missing,
     is_code_correction,
     normalize_unit,
     parse_number,
     parse_tool_arguments,
+    remove_common_adjustments,
     remove_noncontrolling,
     row_cells,
 )
@@ -391,4 +399,122 @@ def test_fill_missing_needs_a_known_column_and_a_matching_row():
 def test_code_corrections_are_recognized():
     assert is_code_correction(NONCONTROLLING_CORRECTED)
     assert is_code_correction("EPS:filled_from_row")
+    assert is_code_correction(COMMON_CORRECTED)
+    assert is_code_correction(PRETAX_REMOVED)
     assert not is_code_correction("revenue:value_not_a_number")
+
+
+# ------------------------------------------------------------------------------ v5
+
+
+def _answer(metric: str, value: float | None) -> MetricAnswer:
+    return MetricAnswer(metric=metric, value=value, unit="millions", value_usd=None if value is None else value * 1e6, quote="")
+
+
+TWO_NONCONTROLLING_TEXT = """=== INCOME_STATEMENT ===
+(in millions)
+Year Ended December 31, | 2024 | 2023
+Net loss | (11,482) | (3,079)
+Net loss (income) attributable to noncontrolling interests | 129 | (38)
+Net loss (income) attributable to redeemable noncontrolling interests | 42 | (9)
+Net loss available to Example, Inc. | $(11,311) | $(3,126)"""
+
+
+@pytest.mark.parametrize("value, expected", [(-11482, -11311), (-3079, -3126)])
+def test_remove_noncontrolling_adds_up_several_noncontrolling_rows(value, expected):
+    answer = _answer("NetIncome", value)
+    assert remove_noncontrolling(answer, TWO_NONCONTROLLING_TEXT, sum_rows=True).value == expected
+    assert remove_noncontrolling(answer, TWO_NONCONTROLLING_TEXT) is None  # v4 behavior: one row only
+
+
+def test_remove_noncontrolling_with_several_rows_still_needs_numbers_that_add_up():
+    text = TWO_NONCONTROLLING_TEXT.replace("| 42 |", "| 50 |")
+    assert remove_noncontrolling(_answer("NetIncome", -11482), text, sum_rows=True) is None
+
+
+COMMON_TEXT = """=== INCOME_STATEMENT ===
+(Dollars in millions)
+Year Ended December | 2025 | 2024
+Total net revenues | 58,283 | 53,512
+Pre-tax earnings | 21,852 | 18,397
+Net income | 18,000 | 15,000
+Less: net income attributable to noncontrolling interests | 824 | 724
+Net earnings | 17,176 | 14,276
+Preferred stock dividends | 876 | 751
+Net earnings applicable to common shareholders | $16,300 | $13,525
+Diluted earnings per common share | $51.32 | $40.54"""
+
+
+@pytest.mark.parametrize("value, expected", [(16300, 17176), (13525, 14276)])
+def test_remove_common_adjustments_takes_net_income_before_preferred_dividends(value, expected):
+    corrected = remove_common_adjustments(_answer("NetIncome", value), COMMON_TEXT)
+    assert corrected.value == expected and corrected.value_usd == expected * 1e6
+
+
+@pytest.mark.parametrize("value", [17176, 18000, None])
+def test_remove_common_adjustments_leaves_other_answers_alone(value):
+    assert remove_common_adjustments(_answer("NetIncome", value), COMMON_TEXT) is None
+
+
+def test_remove_common_adjustments_needs_numbers_that_add_up():
+    text = COMMON_TEXT.replace("| 876 |", "| 900 |")
+    assert remove_common_adjustments(_answer("NetIncome", 16300), text) is None
+
+
+def test_remove_common_adjustments_ignores_noncontrolling_rows():
+    # The row right above the common row is noncontrolling: the common row *is* the company's net income.
+    text = """=== INCOME_STATEMENT ===
+(millions)
+Year | 2025
+Net income before allocation to noncontrolling interests | 8,050
+Less: Net income attributable to noncontrolling interests | 19
+Net income attributable to Example Inc. common shareholders | $8,031"""
+    assert remove_common_adjustments(_answer("NetIncome", 8031), text) is None
+
+
+def test_v5_turns_common_and_group_rows_into_the_company_row():
+    text = """=== INCOME_STATEMENT ===
+(millions)
+Year | 2025
+Net Income | 21,479
+Less: Net Income Attributable to Noncontrolling Interest | (1,398)
+Net Income Attributable to Example | $20,081
+Less: Preferred Stock Dividends | (207)
+Net Income Attributable to Common Stock | $19,874"""
+    for value, note in ((19874, COMMON_CORRECTED), (21479, NONCONTROLLING_CORRECTED)):
+        answers, notes = apply_common_check([_answer("NetIncome", value)], text)  # same order as extract_filing
+        answers, more = apply_noncontrolling_check(answers, text)
+        assert answers[0].value == 20081 and notes + more == [note]
+
+
+PRETAX_TEXT = """=== INCOME_STATEMENT ===
+(in millions)
+Year | 2025 | 2024
+Total revenues | 94,000 | 88,000
+Income from continuing operations before income taxes | 7,569 | 4,769
+Net income | 5,000 | 2,500"""
+
+
+def test_drop_pretax_removes_income_before_taxes_as_operating_income():
+    answers, notes = drop_pretax([_answer("Revenue", 94000), _answer("OperatingIncome", 7569)], PRETAX_TEXT)
+    assert answers[0].value == 94000
+    assert answers[1].value is None and answers[1].value_usd is None
+    assert notes == [PRETAX_REMOVED]
+
+
+@pytest.mark.parametrize("label", ["Operating income", "Earnings from operations", "Income (loss) from operations"])
+def test_drop_pretax_keeps_an_operating_row(label):
+    text = PRETAX_TEXT.replace("Total revenues | 94,000 | 88,000", f"{label} | 7,569 | 4,769")
+    answers, notes = drop_pretax([_answer("OperatingIncome", 7569)], text)
+    assert answers[0].value == 7569 and notes == []
+
+
+def test_drop_pretax_keeps_values_it_cannot_find():
+    answers, notes = drop_pretax([_answer("OperatingIncome", 1234), _answer("OperatingIncome", None)], PRETAX_TEXT)
+    assert [a.value for a in answers] == [1234, None] and notes == []
+
+
+def test_v5_reuses_the_v4_prompt():
+    assert VERSIONS["v5"].prompt == VERSIONS["v4"].prompt
+    assert VERSIONS["v5"].check_common and VERSIONS["v5"].drop_pretax and VERSIONS["v5"].sum_noncontrolling
+    assert not VERSIONS["v4"].sum_noncontrolling  # v4 results must not change

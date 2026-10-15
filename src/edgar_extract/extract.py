@@ -6,6 +6,8 @@ reading errors and unit errors can be told apart later. From v3 on, the scale is
 from the table header in code and the model's unit is ignored. From v4 on, code also
 fills values the model left empty from rows labeled as such (e.g. "Loss from operations")
 and checks whether the model's net income still includes noncontrolling interests.
+From v5 on, code also removes "income before taxes" given as operating income and
+replaces net income "applicable to common shareholders" with the company's net income.
 
 Usage:
     python -m edgar_extract.extract                         # both default models, latest version, all filings
@@ -94,6 +96,9 @@ class Version:
     unit_source: str  # "model" = unit chosen by the model, "code" = read from the table header
     check_noncontrolling: bool = False  # correct a net income that still includes noncontrolling interests
     fill_missing: bool = False  # fill values the model left empty from rows with the metric's usual label
+    sum_noncontrolling: bool = False  # the noncontrolling check may also add up several noncontrolling rows
+    check_common: bool = False  # replace net income "applicable to common shareholders" with the company's net income
+    drop_pretax: bool = False  # remove "income before taxes" given as operating income
 
 
 # Every change gets a new version, so runs stay comparable. The tool stays the same.
@@ -102,8 +107,18 @@ VERSIONS = {
     "v2": Version(prompt="v2", unit_source="model"),  # general rules against the v1 error types
     "v3": Version(prompt="v2", unit_source="code"),  # same LLM answers as v2 (cached); only the unit changes
     "v4": Version(prompt="v4", unit_source="code", check_noncontrolling=True, fill_missing=True),  # see CLAUDE.md
+    # Same LLM answers as v4 (cached); only post-processing changes.
+    "v5": Version(
+        prompt="v4",
+        unit_source="code",
+        check_noncontrolling=True,
+        fill_missing=True,
+        sum_noncontrolling=True,
+        check_common=True,
+        drop_pretax=True,
+    ),
 }
-LATEST_VERSION = "v4"
+LATEST_VERSION = "v5"
 
 
 def build_tool() -> dict:
@@ -272,8 +287,10 @@ NET_INCOME_LABEL = re.compile(r"\bnet\b.*\b(income|earnings|loss|profit)|^(less:
 NONCONTROLLING_WINDOW = 4  # the rows after "Net income" that may hold the split
 NONCONTROLLING_CORRECTED = "NetIncome:noncontrolling_removed"
 FILLED_FROM_ROW = ":filled_from_row"  # e.g. "OperatingIncome:filled_from_row"
+COMMON_CORRECTED = "NetIncome:common_adjustments_removed"
+PRETAX_REMOVED = "OperatingIncome:pretax_removed"
 # Notes in format_issues that record a correction made by code, not an answer that broke the form.
-CODE_CORRECTIONS = (NONCONTROLLING_CORRECTED, FILLED_FROM_ROW)
+CODE_CORRECTIONS = (NONCONTROLLING_CORRECTED, FILLED_FROM_ROW, COMMON_CORRECTED, PRETAX_REMOVED)
 
 
 def is_code_correction(issue: str) -> bool:
@@ -305,18 +322,20 @@ def row_cells(line: str, raw: bool = False) -> tuple[str, list]:
     return label, values
 
 
-def _close(a: float, b: float) -> bool:
-    return abs(a - b) <= 1.0  # printed amounts are rounded, so a sum can be off by 1
+def _close(a: float, b: float, rows: int = 1) -> bool:
+    return abs(a - b) <= rows  # printed amounts are rounded, so a sum can be off by 1 per row added
 
 
-def remove_noncontrolling(answer: MetricAnswer, text: str) -> MetricAnswer | None:
+def remove_noncontrolling(answer: MetricAnswer, text: str, sum_rows: bool = False) -> MetricAnswer | None:
     """If the model's net income includes noncontrolling interests, return the corrected answer.
 
     Many income statements show three rows: net income of the whole group, the part that
     belongs to noncontrolling interests (other owners of subsidiaries), and net income
     attributable to the company. Small models often report the first row. The fix is only
     applied if the numbers add up: group = noncontrolling + company, in the same column.
-    Returns None if nothing needs to change.
+    Some statements split the noncontrolling part into several rows (e.g. a "redeemable"
+    one); with sum_rows=True (v5) their sum may add up, too. Returns None if nothing needs
+    to change.
     """
     if answer.metric != "NetIncome" or answer.value is None:
         return None
@@ -337,9 +356,13 @@ def remove_noncontrolling(answer: MetricAnswer, text: str) -> MetricAnswer | Non
             for lab, v in following
             if NET_INCOME_LABEL.search(lab) and not NONCONTROLLING.search(lab) and len(v) > column and v[column] is not None
         ]
-        for minority in minorities:
+        # Each row on its own, or all rows together (signs as printed: one may be a loss, one a profit).
+        totals = [(abs(m), 1) for m in minorities]
+        if sum_rows and len(minorities) > 1:
+            totals.append((abs(sum(minorities)), len(minorities)))
+        for minority, count in totals:
             for company in companies:
-                if abs(company) != group and any(_close(group, abs(company) + s * abs(minority)) for s in (1, -1)):
+                if abs(company) != group and any(_close(group, abs(company) + s * minority, count) for s in (1, -1)):
                     value = company if answer.value * company >= 0 else -company
                     return answer.model_copy(
                         update={
@@ -351,10 +374,98 @@ def remove_noncontrolling(answer: MetricAnswer, text: str) -> MetricAnswer | Non
     return None
 
 
-def apply_noncontrolling_check(answers: list[MetricAnswer], text: str) -> tuple[list[MetricAnswer], list[str]]:
+COMMON = re.compile(r"\bcommon\b", re.I)
+COMMON_WINDOW = 3  # rows between the company's net income and the common shareholders' row
+
+
+def remove_common_adjustments(answer: MetricAnswer, text: str) -> MetricAnswer | None:
+    """If the model's net income is the amount for common shareholders, return the company's net income.
+
+    Banks and companies with preferred stock show net income, then deductions such as
+    preferred dividends, then net income "applicable to common shareholders". The metric is
+    the company's net income before those deductions. The fix is only applied if the numbers
+    add up: company = common + the rows in between, in the same column. Rows for
+    noncontrolling interests are never part of it (that is remove_noncontrolling's job).
+    Returns None if nothing needs to change.
+    """
+    if answer.metric != "NetIncome" or answer.value is None:
+        return None
+    rows = [row_cells(line) for line in section_lines(text, "income_statement") if "|" in line]
+    for i, (label, values) in enumerate(rows):
+        if not (NET_INCOME_LABEL.search(label) and COMMON.search(label)):
+            continue
+        column = next((c for c, v in enumerate(values) if v is not None and abs(v) == abs(answer.value)), None)
+        if column is None:
+            continue
+        common = values[column]
+        between = []
+        for above_label, above in reversed(rows[max(0, i - COMMON_WINDOW - 1) : i]):
+            if NONCONTROLLING.search(above_label) or len(above) <= column or above[column] is None:
+                return None
+            if not NET_INCOME_LABEL.search(above_label) or COMMON.search(above_label):
+                between.append(above[column])
+                continue
+            company = above[column]
+            if not between or abs(company) == abs(common):
+                return None
+            deductions = abs(sum(between))
+            if not any(_close(abs(company), abs(common) + s * deductions, len(between)) for s in (1, -1)):
+                return None
+            value = company if answer.value * company >= 0 else -company
+            return answer.model_copy(
+                update={"value": value, "value_usd": value * UNIT_SCALE[answer.unit] if answer.unit else None}
+            )
+        return None
+    return None
+
+
+def apply_common_check(answers: list[MetricAnswer], text: str) -> tuple[list[MetricAnswer], list[str]]:
     updated, notes = [], []
     for answer in answers:
-        corrected = remove_noncontrolling(answer, text)
+        corrected = remove_common_adjustments(answer, text)
+        if corrected is not None:
+            notes.append(COMMON_CORRECTED)
+        updated.append(corrected or answer)
+    return updated, notes
+
+
+# ------------------------------------------------- income before taxes is not operating income
+
+PRETAX = re.compile(r"\bbefore\b.*\btax|\bpre-?tax", re.I)
+OPERATING_ROW = re.compile(r"^operating|from operations\W*$", re.I)  # as in ROW_LABELS["OperatingIncome"]
+
+
+def drop_pretax(answers: list[MetricAnswer], text: str) -> tuple[list[MetricAnswer], list[str]]:
+    """Remove an operating income that is really "income before taxes".
+
+    Where a statement has no operating income line, models often report income before
+    income taxes instead, although the prompt says not to. The value is removed if every
+    income-statement row that shows it is an income-before-taxes row; a row that is also
+    labeled as operating (e.g. "Operating income" with the same amount) keeps it.
+    """
+    rows = [row_cells(line) for line in section_lines(text, "income_statement") if "|" in line]
+    updated, notes = [], []
+    for answer in answers:
+        if answer.metric != "OperatingIncome" or answer.value is None:
+            updated.append(answer)
+            continue
+        labels = [label for label, values in rows if any(v is not None and abs(v) == abs(answer.value) for v in values)]
+        pretax_only = bool(labels) and all(
+            PRETAX.search(label) and not OPERATING_ROW.search(label) for label in labels
+        )
+        if pretax_only:
+            notes.append(PRETAX_REMOVED)
+            answer = answer.model_copy(update={"value": None, "value_usd": None})
+        updated.append(answer)
+    return updated, notes
+
+
+def apply_noncontrolling_check(
+    answers: list[MetricAnswer], text: str, sum_rows: bool = False
+) -> tuple[list[MetricAnswer], list[str]]:
+    updated, notes = [], []
+    for answer in answers:
+        corrected = remove_noncontrolling(answer, text, sum_rows)
         if corrected is not None:
             notes.append(NONCONTROLLING_CORRECTED)
         updated.append(corrected or answer)
@@ -453,11 +564,17 @@ def extract_filing(
         answers, unit_issues = apply_detected_units(answers, text)
         # The model's own unit no longer matters, so its unit problems are not issues anymore.
         issues = [i for i in issues if not i.endswith(":unknown_unit")] + unit_issues
+    if spec.drop_pretax:  # before filling: a real "Loss from operations" row may then take its place
+        answers, notes = drop_pretax(answers, text)
+        issues += notes
     if spec.fill_missing:
         answers, notes = fill_missing(answers, text)
         issues += notes
+    if spec.check_common:  # before the noncontrolling check, which needs the company's (not the common) row
+        answers, notes = apply_common_check(answers, text)
+        issues += notes
     if spec.check_noncontrolling:  # after filling: a filled net income may include noncontrolling interests
-        answers, notes = apply_noncontrolling_check(answers, text)
+        answers, notes = apply_noncontrolling_check(answers, text, spec.sum_noncontrolling)
         issues += notes
 
     with db.connect(db_path) as conn:
@@ -482,13 +599,19 @@ def main(argv: list[str] | None = None) -> None:
     with db.connect() as conn:
         filings = conn.execute(
             """
-            SELECT f.accession_number, f.ticker, f.fiscal_year, f.report_date, p.text_path
+            SELECT f.accession_number, f.ticker, f.fiscal_year, f.report_date, p.text_path, p.method
             FROM filings f JOIN preprocessing p USING (accession_number)
             ORDER BY f.ticker, f.fiscal_year DESC
             """
         ).fetchall()
     if not filings:
         raise SystemExit("No preprocessed filings found. Run edgar_extract.ground_truth and edgar_extract.preprocess first.")
+    # Without the statements (e.g. they are in an exhibit, not in the main document) the
+    # model would get the whole 10-K and the answers could not be in it: skip these filings.
+    skipped = [f"{row['ticker']} {row['fiscal_year']}" for row in filings if row["method"] != "sections"]
+    filings = [row for row in filings if row["method"] == "sections"]
+    if skipped:
+        print(f"Skipped (financial statements not found in the main document): {', '.join(skipped)}")
 
     client = OllamaClient()
     for model in args.models:

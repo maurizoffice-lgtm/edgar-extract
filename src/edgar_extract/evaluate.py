@@ -12,8 +12,9 @@ Metrics without ground truth (e.g. OperatingIncome for banks) are not counted in
 accuracy; they are reported separately ("answered although not reported").
 
 Results are always shown per data set: the development companies (used to tune prompts
-and code), test set 1 (held out until v3; its errors were studied for v4) and test set 2
-(held out, never used for tuning), see datasets.py.
+and code), test set 1 (held out until v3; its errors were studied for v4), test set 2
+(held out until v4; its errors were studied for v5) and test set 3 (held out, never used
+for tuning), see datasets.py.
 
 Usage:
     python -m edgar_extract.evaluate      # evaluates all runs, writes reports/evaluation.md
@@ -29,7 +30,7 @@ import pandas as pd
 
 from edgar_extract import db
 from edgar_extract.config import PROJECT_ROOT, REPORTS_DIR
-from edgar_extract.datasets import DEVELOPMENT, TEST, TEST2, dataset_of
+from edgar_extract.datasets import DEVELOPMENT, TEST, TEST2, TEST3, dataset_of
 from edgar_extract.extract import METRIC_FIELDS, UNIT_SCALE, is_code_correction
 
 TOLERANCE = 0.005  # 0.5 % relative
@@ -283,7 +284,7 @@ def _money(value) -> str:
     return f"{value / 1e6:,.0f} M"
 
 
-DATASET_LABELS = {DEVELOPMENT: "Development", TEST: "Test set 1", TEST2: "Test set 2"}
+DATASET_LABELS = {DEVELOPMENT: "Development", TEST: "Test set 1", TEST2: "Test set 2", TEST3: "Test set 3"}
 
 
 def _with_labels(df: pd.DataFrame) -> pd.DataFrame:
@@ -296,7 +297,7 @@ def _with_labels(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _column_order(df: pd.DataFrame) -> list[str]:
-    """Wide-table columns: development runs first, then test set 1, then test set 2."""
+    """Wide-table columns: development runs first, then test sets 1, 2 and 3."""
     keys = df[["dataset", "run", "column"]].drop_duplicates()
     keys = keys.assign(order=keys["dataset"].map(list(DATASET_LABELS).index)).sort_values(["order", "run"])
     return list(keys["column"])
@@ -308,7 +309,7 @@ def _dataset_summary(evals: pd.DataFrame, dataset: str) -> str:
     return f"{filings['accession_number'].nunique()} filings from {len(tickers)} companies ({', '.join(tickers)})"
 
 
-def build_report(evals: pd.DataFrame, runs: pd.DataFrame) -> str:
+def build_report(evals: pd.DataFrame, runs: pd.DataFrame, skipped: list[str] = ()) -> str:
     evals = _with_labels(evals)
     graded = evals[evals["truth"].notna()].copy()
     graded["correct"] = graded["category"] == CORRECT
@@ -337,7 +338,18 @@ def build_report(evals: pd.DataFrame, runs: pd.DataFrame) -> str:
     if (evals["dataset"] == TEST2).any():
         lines.append(
             f"- **Test set 2:** {_dataset_summary(evals, TEST2)}. "
-            "Added after v4 was written and never used for tuning — the honest measure for v4."
+            "Held out until v4 (the honest measure for v4); its errors were then studied to build v5, "
+            "so v5 results here are optimistic too."
+        )
+    if (evals["dataset"] == TEST3).any():
+        lines.append(
+            f"- **Test set 3:** {_dataset_summary(evals, TEST3)}. "
+            "Added before v5 was written and never used for tuning — the honest measure for v5."
+        )
+    if skipped:
+        lines.append(
+            f"- **Not extracted:** {', '.join(skipped)} — the financial statements are not in the main "
+            "10-K document (e.g. in an exhibit), so these filings were not sent to the models."
         )
     lines += ["", "## Overall accuracy", ""]
 
@@ -461,11 +473,21 @@ def load_runs(db_path: Path = db.DB_PATH) -> pd.DataFrame:
     return df
 
 
+def load_skipped(db_path: Path = db.DB_PATH) -> list[str]:
+    """Companies whose filings were not extracted because no statements were found, e.g. "IBM (5 filings)"."""
+    with db.connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT f.ticker, COUNT(*) AS n FROM preprocessing p JOIN filings f USING (accession_number) "
+            "WHERE p.method != 'sections' GROUP BY f.ticker ORDER BY f.ticker"
+        ).fetchall()
+    return [f"{row['ticker']} ({row['n']} filings)" for row in rows]
+
+
 def main() -> None:
     evals = evaluate()
     if evals.empty:
         raise SystemExit("No extraction runs found. Run edgar_extract.extract first.")
-    report = build_report(evals, load_runs())
+    report = build_report(evals, load_runs(), load_skipped())
     REPORTS_DIR.mkdir(exist_ok=True)
     path = REPORTS_DIR / "evaluation.md"
     path.write_text(report, encoding="utf-8")

@@ -1,10 +1,13 @@
-"""Tests for the split into development companies and test sets 1 and 2."""
+"""Tests for the split into development companies and test sets 1, 2 and 3."""
 
 from edgar_extract.datasets import (
     DEVELOPMENT,
     DEVELOPMENT_TICKERS,
     TEST,
     TEST2,
+    TEST2_TICKERS,
+    TEST3,
+    TEST3_TICKERS,
     TEST_COUNT,
     TEST_TICKERS,
     dataset_of,
@@ -14,14 +17,16 @@ from edgar_extract.datasets import (
 
 
 def test_sets_do_not_overlap():
-    assert not set(DEVELOPMENT_TICKERS) & set(TEST_TICKERS)
+    sets = [set(DEVELOPMENT_TICKERS), set(TEST_TICKERS), set(TEST2_TICKERS), set(TEST3_TICKERS)]
+    assert sum(len(s) for s in sets) == len(set().union(*sets))
 
 
 def test_dataset_of():
     assert dataset_of("aapl") == DEVELOPMENT
     assert dataset_of("NFLX") == TEST
     assert dataset_of("INTC") == TEST2
-    assert dataset_of("ZZZZ") == TEST2  # any company not listed is unseen
+    assert dataset_of("MS") == TEST3
+    assert dataset_of("ZZZZ") == TEST3  # any company not listed is unseen
 
 
 def test_selection():

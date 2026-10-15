@@ -165,17 +165,20 @@ def test_report_separates_data_sets(small_db):
     assert set(evals["dataset"]) == {"development"}  # XOM was used for development
     test_evals = evals.assign(dataset="test", ticker="NFLX")
     test2_evals = evals.assign(dataset="test2", ticker="INTC")
+    test3_evals = evals.assign(dataset="test3", ticker="MS")
     runs = pd.DataFrame(
         [{"model": "m", "version": "v1", "input_tokens": 2500, "output_tokens": 300, "duration_s": 15.0,
           "cost_usd": 0.0, "format_issue_count": 0, "code_correction_count": 2, "dataset": dataset}
-         for dataset in ("development", "test", "test2")]
+         for dataset in ("development", "test", "test2", "test3")]
     )  # fmt: skip
-    report = build_report(pd.concat([test2_evals, evals, test_evals]), runs)
+    report = build_report(pd.concat([test3_evals, test2_evals, evals, test_evals]), runs, ["WFC (5 filings)"])
     assert "**Test set 1:** 1 filings from 1 companies (NFLX)" in report
     assert "**Test set 2:** 1 filings from 1 companies (INTC)" in report
+    assert "**Test set 3:** 1 filings from 1 companies (MS)" in report
+    assert "**Not extracted:** WFC (5 filings)" in report
     assert "| Development | m / v1 | 50% (2/4)" in report
     assert "| Test set 2 | m / v1 | 50% (2/4)" in report
-    assert "m / v1 · Development | m / v1 · Test set 1 | m / v1 · Test set 2" in report  # per-metric columns
+    assert "m / v1 · Development | m / v1 · Test set 1 | m / v1 · Test set 2 | m / v1 · Test set 3" in report  # per-metric columns
     assert "Code corrections" in report
 
 

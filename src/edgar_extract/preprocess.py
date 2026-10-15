@@ -120,6 +120,8 @@ NOT_A_TITLE = re.compile(
 )
 # A title may end with its date, e.g. "... for the Years Ended December 31," (without a year).
 TITLE_DATE = re.compile(r"\b(?:for the (?:fiscal )?years? ended|at|as of) [a-z]+ \d{1,2},?$", re.I)
+# ... or with a footnote marker, e.g. "Consolidated Balance Sheets (1)".
+FOOTNOTE_MARKER = re.compile(r"\(\d\)$")
 # Any short line naming a statement ends the previous section.
 MAX_STOP_LINE = 100
 
@@ -151,7 +153,9 @@ STATEMENTS = [
     StatementKind(
         name="balance_sheet",
         title=BALANCE_TITLE,
-        required=[["total assets"], ["total liabilities"]],
+        # Some balance sheets print the totals without a label ("$117,106"): then only the
+        # current-assets/-liabilities subtotals are labeled.
+        required=[["total assets", "total current assets"], ["total liabilities", "total current liabilities"]],
     ),
 ]
 
@@ -186,7 +190,7 @@ def _title_lines(text: str, pattern: str) -> list[tuple[int, str]]:
     """Positions (line start) of lines that are a statement title on their own."""
     titles = []
     for start, line, remainder in _matching_lines(text, pattern):
-        remainder = TITLE_DATE.sub("", remainder).strip()
+        remainder = TITLE_DATE.sub("", FOOTNOTE_MARKER.sub("", remainder).strip()).strip()
         if len(remainder) <= MAX_TITLE_REMAINDER and not NOT_A_TITLE.search(remainder):
             titles.append((start, line))
     return titles

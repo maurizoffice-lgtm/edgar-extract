@@ -6,7 +6,9 @@ A value counts as correct if it is within 0.5% of the XBRL ground truth. Metrics
 
 - **Development:** 10 filings from 5 companies (AAPL, JNJ, JPM, MSFT, XOM). Prompts and code were tuned on these, so their accuracy is optimistic.
 - **Test set 1:** 100 filings from 20 companies (AMZN, BA, BAC, CAT, CVX, DIS, GOOGL, HD, KO, MCD, NEE, NFLX, NVDA, PFE, PG, TRV, UNH, V, VZ, WMT). Held out until v3; its errors were then studied to build v4, so v4 results here are optimistic too.
-- **Test set 2:** 75 filings from 15 companies (AIG, CMCSA, COST, DUK, F, GS, INTC, LLY, LMT, MRNA, NKE, ORCL, T, UBER, WBD). Added after v4 was written and never used for tuning — the honest measure for v4.
+- **Test set 2:** 75 filings from 15 companies (AIG, CMCSA, COST, DUK, F, GS, INTC, LLY, LMT, MRNA, NKE, ORCL, T, UBER, WBD). Held out until v4 (the honest measure for v4); its errors were then studied to build v5, so v5 results here are optimistic too.
+- **Test set 3:** 65 filings from 13 companies (ADBE, BMY, BX, CSCO, GM, HON, KKR, KMI, MET, MRK, MS, SCHW, TGT). Added before v5 was written and never used for tuning — the honest measure for v5.
+- **Not extracted:** IBM (5 filings), WFC (5 filings) — the financial statements are not in the main 10-K document (e.g. in an exhibit), so these filings were not sent to the models.
 
 ## Overall accuracy
 
@@ -16,82 +18,106 @@ A value counts as correct if it is within 0.5% of the XBRL ground truth. Metrics
 | Development | qwen3.5:2b / v2 | 77% (34/44) | 3,045 | 203 | 6.9 | $0.0000 | 8 | 0 | 98% (43/44) |
 | Development | qwen3.5:2b / v3 | 95% (42/44) | 3,045 | 203 | 6.9 | $0.0000 | 8 | 0 | 98% (43/44) |
 | Development | qwen3.5:2b / v4 | 100% (44/44) | 3,126 | 204 | 6.9 | $0.0000 | 4 | 0 | 100% (44/44) |
+| Development | qwen3.5:2b / v5 | 100% (44/44) | 3,126 | 204 | 6.9 | $0.0000 | 4 | 0 | 100% (44/44) |
 | Development | qwen3.5:4b / v1 | 98% (43/44) | 2,815 | 307 | 15.2 | $0.0000 | 4 | 0 | 98% (45/46) |
 | Development | qwen3.5:4b / v2 | 100% (44/44) | 3,045 | 291 | 15.8 | $0.0000 | 0 | 0 | 98% (45/46) |
 | Development | qwen3.5:4b / v3 | 100% (44/44) | 3,045 | 291 | 15.8 | $0.0000 | 0 | 0 | 98% (45/46) |
 | Development | qwen3.5:4b / v4 | 100% (44/44) | 3,126 | 292 | 15.7 | $0.0000 | 0 | 0 | 98% (45/46) |
+| Development | qwen3.5:4b / v5 | 100% (44/44) | 3,126 | 292 | 15.7 | $0.0000 | 0 | 2 | 98% (43/44) |
 | Test set 1 | qwen3.5:2b / v3 | 90% (421/470) | 3,031 | 206 | 6.3 | $0.0000 | 10 | 0 | 95% (438/461) |
 | Test set 1 | qwen3.5:2b / v4 | 97% (456/470) | 3,112 | 209 | 6.5 | $0.0000 | 20 | 49 | 95% (450/475) |
+| Test set 1 | qwen3.5:2b / v5 | 97% (457/470) | 3,112 | 209 | 6.5 | $0.0000 | 20 | 51 | 95% (449/474) |
 | Test set 1 | qwen3.5:4b / v3 | 97% (455/470) | 3,031 | 310 | 15.0 | $0.0000 | 0 | 0 | 100% (473/475) |
 | Test set 1 | qwen3.5:4b / v4 | 97% (458/470) | 3,112 | 310 | 15.0 | $0.0000 | 0 | 12 | 100% (478/480) |
+| Test set 1 | qwen3.5:4b / v5 | 98% (459/470) | 3,112 | 310 | 15.0 | $0.0000 | 0 | 18 | 100% (473/475) |
 | Test set 2 | qwen3.5:2b / v3 | 88% (310/351) | 3,285 | 209 | 6.7 | $0.0000 | 23 | 0 | 90% (313/348) |
 | Test set 2 | qwen3.5:2b / v4 | 95% (335/351) | 3,366 | 212 | 6.8 | $0.0000 | 20 | 28 | 90% (320/357) |
+| Test set 2 | qwen3.5:2b / v5 | 97% (342/351) | 3,366 | 212 | 6.8 | $0.0000 | 20 | 38 | 90% (317/354) |
 | Test set 2 | qwen3.5:4b / v3 | 95% (335/351) | 3,285 | 308 | 15.9 | $0.0000 | 20 | 0 | 97% (350/359) |
 | Test set 2 | qwen3.5:4b / v4 | 97% (342/351) | 3,366 | 310 | 15.9 | $0.0000 | 20 | 11 | 98% (355/363) |
+| Test set 2 | qwen3.5:4b / v5 | 99% (347/351) | 3,366 | 310 | 15.9 | $0.0000 | 20 | 25 | 98% (347/355) |
+| Test set 3 | qwen3.5:2b / v4 | 94% (264/281) | 3,258 | 205 | 6.6 | $0.0000 | 0 | 29 | 93% (264/283) |
+| Test set 3 | qwen3.5:2b / v5 | 97% (273/281) | 3,258 | 205 | 6.6 | $0.0000 | 0 | 41 | 93% (261/280) |
+| Test set 3 | qwen3.5:4b / v4 | 97% (273/281) | 3,258 | 290 | 15.0 | $0.0000 | 0 | 8 | 100% (291/292) |
+| Test set 3 | qwen3.5:4b / v5 | 98% (275/281) | 3,258 | 290 | 15.0 | $0.0000 | 0 | 18 | 100% (283/284) |
 
 ## Accuracy per metric
 
-| Metric | qwen3.5:2b / v1 · Development | qwen3.5:2b / v2 · Development | qwen3.5:2b / v3 · Development | qwen3.5:2b / v4 · Development | qwen3.5:4b / v1 · Development | qwen3.5:4b / v2 · Development | qwen3.5:4b / v3 · Development | qwen3.5:4b / v4 · Development | qwen3.5:2b / v3 · Test set 1 | qwen3.5:2b / v4 · Test set 1 | qwen3.5:4b / v3 · Test set 1 | qwen3.5:4b / v4 · Test set 1 | qwen3.5:2b / v3 · Test set 2 | qwen3.5:2b / v4 · Test set 2 | qwen3.5:4b / v3 · Test set 2 | qwen3.5:4b / v4 · Test set 2 |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| Revenue | 50% (5/10) | 70% (7/10) | 90% (9/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 95% (95/100) | 95% (95/100) | 95% (95/100) | 95% (95/100) | 93% (70/75) | 93% (70/75) | 95% (71/75) | 95% (71/75) |
-| OperatingIncome | 100% (4/4) | 100% (4/4) | 100% (4/4) | 100% (4/4) | 100% (4/4) | 100% (4/4) | 100% (4/4) | 100% (4/4) | 88% (70/80) | 94% (75/80) | 91% (73/80) | 94% (75/80) | 89% (49/55) | 98% (54/55) | 98% (54/55) | 100% (55/55) |
-| NetIncome | 50% (5/10) | 50% (5/10) | 90% (9/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 72% (68/95) | 99% (94/95) | 97% (92/95) | 99% (94/95) | 64% (46/72) | 89% (64/72) | 85% (61/72) | 93% (67/72) |
-| EPS | 90% (9/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 90% (9/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 93% (88/95) | 97% (92/95) | 100% (95/95) | 99% (94/95) | 95% (70/74) | 97% (72/74) | 100% (74/74) | 100% (74/74) |
-| TotalAssets | 100% (10/10) | 80% (8/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (100/100) | 100% (100/100) | 100% (100/100) | 100% (100/100) | 100% (75/75) | 100% (75/75) | 100% (75/75) | 100% (75/75) |
+| Metric | qwen3.5:2b / v1 · Development | qwen3.5:2b / v2 · Development | qwen3.5:2b / v3 · Development | qwen3.5:2b / v4 · Development | qwen3.5:2b / v5 · Development | qwen3.5:4b / v1 · Development | qwen3.5:4b / v2 · Development | qwen3.5:4b / v3 · Development | qwen3.5:4b / v4 · Development | qwen3.5:4b / v5 · Development | qwen3.5:2b / v3 · Test set 1 | qwen3.5:2b / v4 · Test set 1 | qwen3.5:2b / v5 · Test set 1 | qwen3.5:4b / v3 · Test set 1 | qwen3.5:4b / v4 · Test set 1 | qwen3.5:4b / v5 · Test set 1 | qwen3.5:2b / v3 · Test set 2 | qwen3.5:2b / v4 · Test set 2 | qwen3.5:2b / v5 · Test set 2 | qwen3.5:4b / v3 · Test set 2 | qwen3.5:4b / v4 · Test set 2 | qwen3.5:4b / v5 · Test set 2 | qwen3.5:2b / v4 · Test set 3 | qwen3.5:2b / v5 · Test set 3 | qwen3.5:4b / v4 · Test set 3 | qwen3.5:4b / v5 · Test set 3 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Revenue | 50% (5/10) | 70% (7/10) | 90% (9/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 95% (95/100) | 95% (95/100) | 95% (95/100) | 95% (95/100) | 95% (95/100) | 95% (95/100) | 93% (70/75) | 93% (70/75) | 93% (70/75) | 95% (71/75) | 95% (71/75) | 95% (71/75) | 98% (64/65) | 98% (64/65) | 98% (64/65) | 98% (64/65) |
+| OperatingIncome | 100% (4/4) | 100% (4/4) | 100% (4/4) | 100% (4/4) | 100% (4/4) | 100% (4/4) | 100% (4/4) | 100% (4/4) | 100% (4/4) | 100% (4/4) | 88% (70/80) | 94% (75/80) | 94% (75/80) | 91% (73/80) | 94% (75/80) | 94% (75/80) | 89% (49/55) | 98% (54/55) | 98% (54/55) | 98% (54/55) | 100% (55/55) | 100% (55/55) | 86% (25/29) | 86% (25/29) | 86% (25/29) | 86% (25/29) |
+| NetIncome | 50% (5/10) | 50% (5/10) | 90% (9/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 72% (68/95) | 99% (94/95) | 100% (95/95) | 97% (92/95) | 99% (94/95) | 100% (95/95) | 64% (46/72) | 89% (64/72) | 99% (71/72) | 85% (61/72) | 93% (67/72) | 100% (72/72) | 84% (54/64) | 98% (63/64) | 95% (61/64) | 98% (63/64) |
+| EPS | 90% (9/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 90% (9/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 93% (88/95) | 97% (92/95) | 97% (92/95) | 100% (95/95) | 99% (94/95) | 99% (94/95) | 95% (70/74) | 97% (72/74) | 97% (72/74) | 100% (74/74) | 100% (74/74) | 100% (74/74) | 98% (59/60) | 98% (59/60) | 100% (60/60) | 100% (60/60) |
+| TotalAssets | 100% (10/10) | 80% (8/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (100/100) | 100% (100/100) | 100% (100/100) | 100% (100/100) | 100% (100/100) | 100% (100/100) | 100% (75/75) | 100% (75/75) | 100% (75/75) | 100% (75/75) | 100% (75/75) | 100% (75/75) | 98% (62/63) | 98% (62/63) | 100% (63/63) | 100% (63/63) |
 
 ## Accuracy per company
 
-| Data set | Company | qwen3.5:2b / v1 | qwen3.5:2b / v2 | qwen3.5:2b / v3 | qwen3.5:2b / v4 | qwen3.5:4b / v1 | qwen3.5:4b / v2 | qwen3.5:4b / v3 | qwen3.5:4b / v4 |
-|---|---|---|---|---|---|---|---|---|---|
-| Development | AAPL | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) |
-| Development | JNJ | 50% (4/8) | 25% (2/8) | 100% (8/8) | 100% (8/8) | 100% (8/8) | 100% (8/8) | 100% (8/8) | 100% (8/8) |
-| Development | JPM | 62% (5/8) | 75% (6/8) | 75% (6/8) | 100% (8/8) | 100% (8/8) | 100% (8/8) | 100% (8/8) | 100% (8/8) |
-| Development | MSFT | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) |
-| Development | XOM | 50% (4/8) | 75% (6/8) | 100% (8/8) | 100% (8/8) | 88% (7/8) | 100% (8/8) | 100% (8/8) | 100% (8/8) |
-| Test set 1 | AMZN | — | — | 100% (25/25) | 100% (25/25) | — | — | 100% (25/25) | 100% (25/25) |
-| Test set 1 | BA | — | — | 48% (12/25) | 100% (25/25) | — | — | 88% (22/25) | 96% (24/25) |
-| Test set 1 | BAC | — | — | 95% (19/20) | 95% (19/20) | — | — | 100% (20/20) | 100% (20/20) |
-| Test set 1 | CAT | — | — | 100% (20/20) | 100% (20/20) | — | — | 100% (20/20) | 100% (20/20) |
-| Test set 1 | CVX | — | — | 90% (18/20) | 100% (20/20) | — | — | 100% (20/20) | 100% (20/20) |
-| Test set 1 | DIS | — | — | 52% (13/25) | 68% (17/25) | — | — | 80% (20/25) | 80% (20/25) |
-| Test set 1 | GOOGL | — | — | 100% (25/25) | 100% (25/25) | — | — | 100% (25/25) | 100% (25/25) |
-| Test set 1 | HD | — | — | 100% (25/25) | 100% (25/25) | — | — | 100% (25/25) | 100% (25/25) |
-| Test set 1 | KO | — | — | 100% (25/25) | 100% (25/25) | — | — | 100% (25/25) | 100% (25/25) |
-| Test set 1 | MCD | — | — | 100% (25/25) | 100% (25/25) | — | — | 100% (25/25) | 100% (25/25) |
-| Test set 1 | NEE | — | — | 80% (20/25) | 80% (20/25) | — | — | 80% (20/25) | 80% (20/25) |
-| Test set 1 | NFLX | — | — | 100% (25/25) | 100% (25/25) | — | — | 100% (25/25) | 100% (25/25) |
-| Test set 1 | NVDA | — | — | 100% (25/25) | 100% (25/25) | — | — | 100% (25/25) | 100% (25/25) |
-| Test set 1 | PFE | — | — | 100% (20/20) | 100% (20/20) | — | — | 95% (19/20) | 95% (19/20) |
-| Test set 1 | PG | — | — | 92% (23/25) | 100% (25/25) | — | — | 100% (25/25) | 100% (25/25) |
-| Test set 1 | TRV | — | — | 100% (20/20) | 100% (20/20) | — | — | 100% (20/20) | 100% (20/20) |
-| Test set 1 | UNH | — | — | 84% (21/25) | 100% (25/25) | — | — | 100% (25/25) | 100% (25/25) |
-| Test set 1 | V | — | — | 100% (20/20) | 100% (20/20) | — | — | 100% (20/20) | 100% (20/20) |
-| Test set 1 | VZ | — | — | 80% (20/25) | 100% (25/25) | — | — | 96% (24/25) | 100% (25/25) |
-| Test set 1 | WMT | — | — | 80% (20/25) | 100% (25/25) | — | — | 100% (25/25) | 100% (25/25) |
-| Test set 2 | AIG | — | — | 75% (15/20) | 90% (18/20) | — | — | 85% (17/20) | 100% (20/20) |
-| Test set 2 | CMCSA | — | — | 100% (25/25) | 100% (25/25) | — | — | 100% (25/25) | 100% (25/25) |
-| Test set 2 | COST | — | — | 100% (25/25) | 100% (25/25) | — | — | 100% (25/25) | 100% (25/25) |
-| Test set 2 | DUK | — | — | 64% (16/25) | 84% (21/25) | — | — | 84% (21/25) | 84% (21/25) |
-| Test set 2 | F | — | — | 100% (22/22) | 100% (22/22) | — | — | 100% (22/22) | 100% (22/22) |
-| Test set 2 | GS | — | — | 80% (16/20) | 90% (18/20) | — | — | 90% (18/20) | 100% (20/20) |
-| Test set 2 | INTC | — | — | 80% (20/25) | 96% (24/25) | — | — | 96% (24/25) | 100% (25/25) |
-| Test set 2 | LLY | — | — | 100% (20/20) | 100% (20/20) | — | — | 100% (20/20) | 100% (20/20) |
-| Test set 2 | LMT | — | — | 100% (25/25) | 100% (25/25) | — | — | 100% (25/25) | 100% (25/25) |
-| Test set 2 | MRNA | — | — | 96% (24/25) | 100% (25/25) | — | — | 100% (25/25) | 100% (25/25) |
-| Test set 2 | NKE | — | — | 100% (20/20) | 100% (20/20) | — | — | 100% (20/20) | 100% (20/20) |
-| Test set 2 | ORCL | — | — | 100% (25/25) | 100% (25/25) | — | — | 100% (25/25) | 100% (25/25) |
-| Test set 2 | T | — | — | 72% (18/25) | 92% (23/25) | — | — | 96% (24/25) | 96% (24/25) |
-| Test set 2 | UBER | — | — | 88% (22/25) | 100% (25/25) | — | — | 100% (25/25) | 100% (25/25) |
-| Test set 2 | WBD | — | — | 71% (17/24) | 79% (19/24) | — | — | 79% (19/24) | 83% (20/24) |
+| Data set | Company | qwen3.5:2b / v1 | qwen3.5:2b / v2 | qwen3.5:2b / v3 | qwen3.5:2b / v4 | qwen3.5:2b / v5 | qwen3.5:4b / v1 | qwen3.5:4b / v2 | qwen3.5:4b / v3 | qwen3.5:4b / v4 | qwen3.5:4b / v5 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| Development | AAPL | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) |
+| Development | JNJ | 50% (4/8) | 25% (2/8) | 100% (8/8) | 100% (8/8) | 100% (8/8) | 100% (8/8) | 100% (8/8) | 100% (8/8) | 100% (8/8) | 100% (8/8) |
+| Development | JPM | 62% (5/8) | 75% (6/8) | 75% (6/8) | 100% (8/8) | 100% (8/8) | 100% (8/8) | 100% (8/8) | 100% (8/8) | 100% (8/8) | 100% (8/8) |
+| Development | MSFT | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) | 100% (10/10) |
+| Development | XOM | 50% (4/8) | 75% (6/8) | 100% (8/8) | 100% (8/8) | 100% (8/8) | 88% (7/8) | 100% (8/8) | 100% (8/8) | 100% (8/8) | 100% (8/8) |
+| Test set 1 | AMZN | — | — | 100% (25/25) | 100% (25/25) | 100% (25/25) | — | — | 100% (25/25) | 100% (25/25) | 100% (25/25) |
+| Test set 1 | BA | — | — | 48% (12/25) | 100% (25/25) | 100% (25/25) | — | — | 88% (22/25) | 96% (24/25) | 100% (25/25) |
+| Test set 1 | BAC | — | — | 95% (19/20) | 95% (19/20) | 100% (20/20) | — | — | 100% (20/20) | 100% (20/20) | 100% (20/20) |
+| Test set 1 | CAT | — | — | 100% (20/20) | 100% (20/20) | 100% (20/20) | — | — | 100% (20/20) | 100% (20/20) | 100% (20/20) |
+| Test set 1 | CVX | — | — | 90% (18/20) | 100% (20/20) | 100% (20/20) | — | — | 100% (20/20) | 100% (20/20) | 100% (20/20) |
+| Test set 1 | DIS | — | — | 52% (13/25) | 68% (17/25) | 68% (17/25) | — | — | 80% (20/25) | 80% (20/25) | 80% (20/25) |
+| Test set 1 | GOOGL | — | — | 100% (25/25) | 100% (25/25) | 100% (25/25) | — | — | 100% (25/25) | 100% (25/25) | 100% (25/25) |
+| Test set 1 | HD | — | — | 100% (25/25) | 100% (25/25) | 100% (25/25) | — | — | 100% (25/25) | 100% (25/25) | 100% (25/25) |
+| Test set 1 | KO | — | — | 100% (25/25) | 100% (25/25) | 100% (25/25) | — | — | 100% (25/25) | 100% (25/25) | 100% (25/25) |
+| Test set 1 | MCD | — | — | 100% (25/25) | 100% (25/25) | 100% (25/25) | — | — | 100% (25/25) | 100% (25/25) | 100% (25/25) |
+| Test set 1 | NEE | — | — | 80% (20/25) | 80% (20/25) | 80% (20/25) | — | — | 80% (20/25) | 80% (20/25) | 80% (20/25) |
+| Test set 1 | NFLX | — | — | 100% (25/25) | 100% (25/25) | 100% (25/25) | — | — | 100% (25/25) | 100% (25/25) | 100% (25/25) |
+| Test set 1 | NVDA | — | — | 100% (25/25) | 100% (25/25) | 100% (25/25) | — | — | 100% (25/25) | 100% (25/25) | 100% (25/25) |
+| Test set 1 | PFE | — | — | 100% (20/20) | 100% (20/20) | 100% (20/20) | — | — | 95% (19/20) | 95% (19/20) | 95% (19/20) |
+| Test set 1 | PG | — | — | 92% (23/25) | 100% (25/25) | 100% (25/25) | — | — | 100% (25/25) | 100% (25/25) | 100% (25/25) |
+| Test set 1 | TRV | — | — | 100% (20/20) | 100% (20/20) | 100% (20/20) | — | — | 100% (20/20) | 100% (20/20) | 100% (20/20) |
+| Test set 1 | UNH | — | — | 84% (21/25) | 100% (25/25) | 100% (25/25) | — | — | 100% (25/25) | 100% (25/25) | 100% (25/25) |
+| Test set 1 | V | — | — | 100% (20/20) | 100% (20/20) | 100% (20/20) | — | — | 100% (20/20) | 100% (20/20) | 100% (20/20) |
+| Test set 1 | VZ | — | — | 80% (20/25) | 100% (25/25) | 100% (25/25) | — | — | 96% (24/25) | 100% (25/25) | 100% (25/25) |
+| Test set 1 | WMT | — | — | 80% (20/25) | 100% (25/25) | 100% (25/25) | — | — | 100% (25/25) | 100% (25/25) | 100% (25/25) |
+| Test set 2 | AIG | — | — | 75% (15/20) | 90% (18/20) | 90% (18/20) | — | — | 85% (17/20) | 100% (20/20) | 100% (20/20) |
+| Test set 2 | CMCSA | — | — | 100% (25/25) | 100% (25/25) | 100% (25/25) | — | — | 100% (25/25) | 100% (25/25) | 100% (25/25) |
+| Test set 2 | COST | — | — | 100% (25/25) | 100% (25/25) | 100% (25/25) | — | — | 100% (25/25) | 100% (25/25) | 100% (25/25) |
+| Test set 2 | DUK | — | — | 64% (16/25) | 84% (21/25) | 84% (21/25) | — | — | 84% (21/25) | 84% (21/25) | 84% (21/25) |
+| Test set 2 | F | — | — | 100% (22/22) | 100% (22/22) | 100% (22/22) | — | — | 100% (22/22) | 100% (22/22) | 100% (22/22) |
+| Test set 2 | GS | — | — | 80% (16/20) | 90% (18/20) | 100% (20/20) | — | — | 90% (18/20) | 100% (20/20) | 100% (20/20) |
+| Test set 2 | INTC | — | — | 80% (20/25) | 96% (24/25) | 96% (24/25) | — | — | 96% (24/25) | 100% (25/25) | 100% (25/25) |
+| Test set 2 | LLY | — | — | 100% (20/20) | 100% (20/20) | 100% (20/20) | — | — | 100% (20/20) | 100% (20/20) | 100% (20/20) |
+| Test set 2 | LMT | — | — | 100% (25/25) | 100% (25/25) | 100% (25/25) | — | — | 100% (25/25) | 100% (25/25) | 100% (25/25) |
+| Test set 2 | MRNA | — | — | 96% (24/25) | 100% (25/25) | 100% (25/25) | — | — | 100% (25/25) | 100% (25/25) | 100% (25/25) |
+| Test set 2 | NKE | — | — | 100% (20/20) | 100% (20/20) | 100% (20/20) | — | — | 100% (20/20) | 100% (20/20) | 100% (20/20) |
+| Test set 2 | ORCL | — | — | 100% (25/25) | 100% (25/25) | 100% (25/25) | — | — | 100% (25/25) | 100% (25/25) | 100% (25/25) |
+| Test set 2 | T | — | — | 72% (18/25) | 92% (23/25) | 92% (23/25) | — | — | 96% (24/25) | 96% (24/25) | 100% (25/25) |
+| Test set 2 | UBER | — | — | 88% (22/25) | 100% (25/25) | 100% (25/25) | — | — | 100% (25/25) | 100% (25/25) | 100% (25/25) |
+| Test set 2 | WBD | — | — | 71% (17/24) | 79% (19/24) | 100% (24/24) | — | — | 79% (19/24) | 83% (20/24) | 100% (24/24) |
+| Test set 3 | ADBE | — | — | — | 100% (25/25) | 100% (25/25) | — | — | — | 100% (25/25) | 100% (25/25) |
+| Test set 3 | BMY | — | — | — | 100% (20/20) | 100% (20/20) | — | — | — | 100% (20/20) | 100% (20/20) |
+| Test set 3 | BX | — | — | — | 75% (15/20) | 100% (20/20) | — | — | — | 100% (20/20) | 100% (20/20) |
+| Test set 3 | CSCO | — | — | — | 100% (25/25) | 100% (25/25) | — | — | — | 100% (25/25) | 100% (25/25) |
+| Test set 3 | GM | — | — | — | 100% (25/25) | 100% (25/25) | — | — | — | 96% (24/25) | 96% (24/25) |
+| Test set 3 | HON | — | — | — | 91% (20/22) | 91% (20/22) | — | — | — | 91% (20/22) | 91% (20/22) |
+| Test set 3 | KKR | — | — | — | 46% (6/13) | 77% (10/13) | — | — | — | 77% (10/13) | 92% (12/13) |
+| Test set 3 | KMI | — | — | — | 100% (25/25) | 100% (25/25) | — | — | — | 100% (25/25) | 100% (25/25) |
+| Test set 3 | MET | — | — | — | 91% (20/22) | 91% (20/22) | — | — | — | 91% (20/22) | 91% (20/22) |
+| Test set 3 | MRK | — | — | — | 95% (19/20) | 95% (19/20) | — | — | — | 100% (20/20) | 100% (20/20) |
+| Test set 3 | MS | — | — | — | 100% (20/20) | 100% (20/20) | — | — | — | 100% (20/20) | 100% (20/20) |
+| Test set 3 | SCHW | — | — | — | 100% (20/20) | 100% (20/20) | — | — | — | 100% (20/20) | 100% (20/20) |
+| Test set 3 | TGT | — | — | — | 100% (24/24) | 100% (24/24) | — | — | — | 100% (24/24) | 100% (24/24) |
 
 ## Error categories
 
-| Category | qwen3.5:2b / v1 · Development | qwen3.5:2b / v2 · Development | qwen3.5:2b / v3 · Development | qwen3.5:2b / v4 · Development | qwen3.5:4b / v1 · Development | qwen3.5:4b / v2 · Development | qwen3.5:4b / v3 · Development | qwen3.5:4b / v4 · Development | qwen3.5:2b / v3 · Test set 1 | qwen3.5:2b / v4 · Test set 1 | qwen3.5:4b / v3 · Test set 1 | qwen3.5:4b / v4 · Test set 1 | qwen3.5:2b / v3 · Test set 2 | qwen3.5:2b / v4 · Test set 2 | qwen3.5:4b / v3 · Test set 2 | qwen3.5:4b / v4 · Test set 2 |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| Value missing | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 19 | 6 | 6 | 3 | 8 | 1 | 1 | 0 |
-| Unit error (thousands/millions) | 5 | 8 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 2 | 2 | 0 | 0 |
-| Wrong metric (other row) | 5 | 2 | 2 | 0 | 0 | 0 | 0 | 0 | 29 | 8 | 9 | 8 | 30 | 12 | 14 | 8 |
-| Other | 0 | 0 | 0 | 0 | 1 | 0 | 0 | 0 | 1 | 0 | 0 | 1 | 1 | 1 | 1 | 1 |
+| Category | qwen3.5:2b / v1 · Development | qwen3.5:2b / v2 · Development | qwen3.5:2b / v3 · Development | qwen3.5:2b / v4 · Development | qwen3.5:2b / v5 · Development | qwen3.5:4b / v1 · Development | qwen3.5:4b / v2 · Development | qwen3.5:4b / v3 · Development | qwen3.5:4b / v4 · Development | qwen3.5:4b / v5 · Development | qwen3.5:2b / v3 · Test set 1 | qwen3.5:2b / v4 · Test set 1 | qwen3.5:2b / v5 · Test set 1 | qwen3.5:4b / v3 · Test set 1 | qwen3.5:4b / v4 · Test set 1 | qwen3.5:4b / v5 · Test set 1 | qwen3.5:2b / v3 · Test set 2 | qwen3.5:2b / v4 · Test set 2 | qwen3.5:2b / v5 · Test set 2 | qwen3.5:4b / v3 · Test set 2 | qwen3.5:4b / v4 · Test set 2 | qwen3.5:4b / v5 · Test set 2 | qwen3.5:2b / v4 · Test set 3 | qwen3.5:2b / v5 · Test set 3 | qwen3.5:4b / v4 · Test set 3 | qwen3.5:4b / v5 · Test set 3 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Value missing | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 19 | 6 | 6 | 6 | 3 | 5 | 8 | 1 | 1 | 1 | 0 | 0 | 8 | 8 | 4 | 5 |
+| Unit error (thousands/millions) | 5 | 8 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 2 | 2 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| Wrong year (prior-year column) | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | 1 |
+| Wrong metric (other row) | 5 | 2 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 29 | 8 | 7 | 9 | 8 | 5 | 30 | 12 | 5 | 14 | 8 | 3 | 9 | 0 | 3 | 0 |
+| Other | 0 | 0 | 0 | 0 | 0 | 1 | 0 | 0 | 0 | 0 | 1 | 0 | 0 | 0 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 0 | 0 | 0 | 0 |
 
 ## Metrics the company does not report
 
@@ -103,18 +129,28 @@ There is no ground truth for these (e.g. banks have no operating income). The ri
 | qwen3.5:2b / v2 · Development | 0 of 6 answered anyway |
 | qwen3.5:2b / v3 · Development | 0 of 6 answered anyway |
 | qwen3.5:2b / v4 · Development | 0 of 6 answered anyway |
+| qwen3.5:2b / v5 · Development | 0 of 6 answered anyway |
 | qwen3.5:4b / v1 · Development | 2 of 6 answered anyway |
 | qwen3.5:4b / v2 · Development | 2 of 6 answered anyway |
 | qwen3.5:4b / v3 · Development | 2 of 6 answered anyway |
 | qwen3.5:4b / v4 · Development | 2 of 6 answered anyway |
+| qwen3.5:4b / v5 · Development | 0 of 6 answered anyway |
 | qwen3.5:2b / v3 · Test set 1 | 10 of 30 answered anyway |
 | qwen3.5:2b / v4 · Test set 1 | 11 of 30 answered anyway |
+| qwen3.5:2b / v5 · Test set 1 | 10 of 30 answered anyway |
 | qwen3.5:4b / v3 · Test set 1 | 11 of 30 answered anyway |
 | qwen3.5:4b / v4 · Test set 1 | 13 of 30 answered anyway |
+| qwen3.5:4b / v5 · Test set 1 | 10 of 30 answered anyway |
 | qwen3.5:2b / v3 · Test set 2 | 5 of 24 answered anyway |
 | qwen3.5:2b / v4 · Test set 2 | 7 of 24 answered anyway |
+| qwen3.5:2b / v5 · Test set 2 | 4 of 24 answered anyway |
 | qwen3.5:4b / v3 · Test set 2 | 9 of 24 answered anyway |
 | qwen3.5:4b / v4 · Test set 2 | 12 of 24 answered anyway |
+| qwen3.5:4b / v5 · Test set 2 | 4 of 24 answered anyway |
+| qwen3.5:2b / v4 · Test set 3 | 10 of 44 answered anyway |
+| qwen3.5:2b / v5 · Test set 3 | 7 of 44 answered anyway |
+| qwen3.5:4b / v4 · Test set 3 | 15 of 44 answered anyway |
+| qwen3.5:4b / v5 · Test set 3 | 8 of 44 answered anyway |
 
 | Data set | Model / version | Company | FY | Metric | Extracted | Quote |
 |---|---|---|---|---|---|---|
@@ -151,6 +187,16 @@ There is no ground truth for these (e.g. banks have no operating income). The ri
 | Test set 1 | qwen3.5:2b / v4 | V | 2023 | EPS | 8.28 | Diluted Earnings Per Share Class A common stock |
 | Test set 1 | qwen3.5:2b / v4 | V | 2024 | EPS | 9.73 | Diluted Earnings Per Share Class A common stock |
 | Test set 1 | qwen3.5:2b / v4 | V | 2025 | EPS | 10.20 | Diluted Earnings Per Share Class A common stock |
+| Test set 1 | qwen3.5:2b / v5 | CAT | 2021 | NetIncome | 6,489 M | Profit 1 |
+| Test set 1 | qwen3.5:2b / v5 | CAT | 2022 | NetIncome | 6,705 M | Profit 1 |
+| Test set 1 | qwen3.5:2b / v5 | CAT | 2023 | NetIncome | 10,335 M | Profit 1 |
+| Test set 1 | qwen3.5:2b / v5 | CAT | 2024 | NetIncome | 10,792 M | Profit 1 |
+| Test set 1 | qwen3.5:2b / v5 | CAT | 2025 | NetIncome | 8,884 M | Profit 1 |
+| Test set 1 | qwen3.5:2b / v5 | V | 2021 | EPS | 5.63 | Basic Earnings Per Share Class A common stock |
+| Test set 1 | qwen3.5:2b / v5 | V | 2022 | EPS | 7.00 | Diluted Earnings Per Share Class A common stock |
+| Test set 1 | qwen3.5:2b / v5 | V | 2023 | EPS | 8.28 | Diluted Earnings Per Share Class A common stock |
+| Test set 1 | qwen3.5:2b / v5 | V | 2024 | EPS | 9.73 | Diluted Earnings Per Share Class A common stock |
+| Test set 1 | qwen3.5:2b / v5 | V | 2025 | EPS | 10.20 | Diluted Earnings Per Share Class A common stock |
 | Test set 1 | qwen3.5:4b / v3 | CAT | 2021 | NetIncome | 6,489 M | Profit 1 / $6,489 / $2,998 / $6,093 |
 | Test set 1 | qwen3.5:4b / v3 | CAT | 2022 | NetIncome | 6,705 M | Profit 1 / $6,705 / $6,489 / $2,998 |
 | Test set 1 | qwen3.5:4b / v3 | CAT | 2023 | NetIncome | 10,335 M | Profit 1 / $10,335 / $6,705 / $6,489 |
@@ -175,6 +221,16 @@ There is no ground truth for these (e.g. banks have no operating income). The ri
 | Test set 1 | qwen3.5:4b / v4 | V | 2023 | EPS | 8.28 | Class A common stock / $8.28 / $7.00 / $5.63 |
 | Test set 1 | qwen3.5:4b / v4 | V | 2024 | EPS | 9.73 | Class A common stock / $9.73 / $8.28 / $7.00 |
 | Test set 1 | qwen3.5:4b / v4 | V | 2025 | EPS | 10.20 | Class A common stock / $10.20 / $9.73 / $8.28 |
+| Test set 1 | qwen3.5:4b / v5 | CAT | 2021 | NetIncome | 6,489 M | Profit 1 / $6,489 / $2,998 / $6,093 |
+| Test set 1 | qwen3.5:4b / v5 | CAT | 2022 | NetIncome | 6,705 M | Profit 1 |
+| Test set 1 | qwen3.5:4b / v5 | CAT | 2023 | NetIncome | 10,335 M | Profit 1 |
+| Test set 1 | qwen3.5:4b / v5 | CAT | 2024 | NetIncome | 10,792 M | Profit of consolidated and affiliated companies / 10,788 / 10,332 / 6,704 |
+| Test set 1 | qwen3.5:4b / v5 | CAT | 2025 | NetIncome | 8,884 M | Profit 1 / $8,884 / $10,792 / $10,335 |
+| Test set 1 | qwen3.5:4b / v5 | V | 2021 | EPS | 5.63 | Class A common stock / $5.63 / $4.89 / $5.32 |
+| Test set 1 | qwen3.5:4b / v5 | V | 2022 | EPS | 7.00 | Class A common stock / $7.00 / $5.63 / $4.89 |
+| Test set 1 | qwen3.5:4b / v5 | V | 2023 | EPS | 8.28 | Class A common stock / $8.28 / $7.00 / $5.63 |
+| Test set 1 | qwen3.5:4b / v5 | V | 2024 | EPS | 9.73 | Class A common stock / $9.73 / $8.28 / $7.00 |
+| Test set 1 | qwen3.5:4b / v5 | V | 2025 | EPS | 10.20 | Class A common stock / $10.20 / $9.73 / $8.28 |
 | Test set 2 | qwen3.5:2b / v3 | F | 2021 | NetIncome | 17,910 M | Net income/(loss) |
 | Test set 2 | qwen3.5:2b / v3 | F | 2022 | NetIncome | -2,152 M | Net income/(loss) |
 | Test set 2 | qwen3.5:2b / v3 | F | 2025 | NetIncome | -8,162 M | Net income/(loss) attributable to Ford Motor Company |
@@ -187,6 +243,10 @@ There is no ground truth for these (e.g. banks have no operating income). The ri
 | Test set 2 | qwen3.5:2b / v4 | GS | 2023 | OperatingIncome | 10,739 M | Pre-tax earnings |
 | Test set 2 | qwen3.5:2b / v4 | GS | 2024 | OperatingIncome | 18,397 M | Pre-tax earnings |
 | Test set 2 | qwen3.5:2b / v4 | WBD | 2021 | EPS | 1.54 | Diluted |
+| Test set 2 | qwen3.5:2b / v5 | F | 2021 | NetIncome | 17,937 M | Net income/(loss) |
+| Test set 2 | qwen3.5:2b / v5 | F | 2022 | NetIncome | -1,981 M | Net income/(loss) |
+| Test set 2 | qwen3.5:2b / v5 | F | 2025 | NetIncome | -8,182 M | Net income/(loss) |
+| Test set 2 | qwen3.5:2b / v5 | WBD | 2021 | EPS | 1.54 | Diluted |
 | Test set 2 | qwen3.5:4b / v3 | F | 2021 | NetIncome | 17,910 M | Net income/(loss) / 84 / (1,276) / 17,910 |
 | Test set 2 | qwen3.5:4b / v3 | F | 2022 | NetIncome | -1,981 M | Net income/(loss) attributable to Ford Motor Company / $(1,279) / $17,937 / $(1, |
 | Test set 2 | qwen3.5:4b / v3 | F | 2025 | NetIncome | -8,182 M | Net income/(loss) attributable to Ford Motor Company / $4,347 / $5,879 / $(8,182 |
@@ -208,6 +268,50 @@ There is no ground truth for these (e.g. banks have no operating income). The ri
 | Test set 2 | qwen3.5:4b / v4 | NKE | 2022 | OperatingIncome | 6,651 M | Income before income taxes / 6,651 / 6,661 / 2,887 |
 | Test set 2 | qwen3.5:4b / v4 | NKE | 2023 | OperatingIncome | 6,201 M | Income before income taxes / 6,201 / 6,651 / 6,661 |
 | Test set 2 | qwen3.5:4b / v4 | WBD | 2021 | EPS | 154.00 | Diluted / $1.54 / $1.81 / $2.88 |
+| Test set 2 | qwen3.5:4b / v5 | F | 2021 | NetIncome | 17,937 M | Net income/(loss) / 84 / (1,276) / 17,910 |
+| Test set 2 | qwen3.5:4b / v5 | F | 2022 | NetIncome | -1,981 M | Net income/(loss) attributable to Ford Motor Company / $(1,279) / $17,937 / $(1, |
+| Test set 2 | qwen3.5:4b / v5 | F | 2025 | NetIncome | -8,182 M | Net income/(loss) attributable to Ford Motor Company / $4,347 / $5,879 / $(8,182 |
+| Test set 2 | qwen3.5:4b / v5 | WBD | 2021 | EPS | 154.00 | Diluted / $1.54 / $1.81 / $2.88 |
+| Test set 3 | qwen3.5:2b / v4 | KKR | 2021 | EPS | 7.31 | Net Income (Loss) Attributable to KKR & Co. Inc. Per Share of Common Stock Dilut |
+| Test set 3 | qwen3.5:2b / v4 | KKR | 2021 | TotalAssets | 264,285 M | Total Assets |
+| Test set 3 | qwen3.5:2b / v4 | KKR | 2022 | EPS | -1.21 | Diluted |
+| Test set 3 | qwen3.5:2b / v4 | KKR | 2022 | TotalAssets | 277,077 M | Total Assets |
+| Test set 3 | qwen3.5:2b / v4 | KKR | 2023 | EPS | 4.09 | Diluted |
+| Test set 3 | qwen3.5:2b / v4 | KKR | 2024 | EPS | 3.28 | Net Income (Loss) Attributable to KKR & Co. Inc. Per Share of Common Stock Dilut |
+| Test set 3 | qwen3.5:2b / v4 | MRK | 2021 | OperatingIncome | 13,879 M | Income from Continuing Operations Before Taxes |
+| Test set 3 | qwen3.5:2b / v4 | MRK | 2022 | OperatingIncome | 16,444 M | Income from Continuing Operations Before Taxes |
+| Test set 3 | qwen3.5:2b / v4 | MS | 2023 | OperatingIncome | 11,813 M | Income before provision for income taxes |
+| Test set 3 | qwen3.5:2b / v4 | TGT | 2022 | NetIncome | 6,946 M | Net earnings from continuing operations |
+| Test set 3 | qwen3.5:2b / v5 | KKR | 2021 | EPS | 7.31 | Net Income (Loss) Attributable to KKR & Co. Inc. Per Share of Common Stock Dilut |
+| Test set 3 | qwen3.5:2b / v5 | KKR | 2021 | TotalAssets | 264,285 M | Total Assets |
+| Test set 3 | qwen3.5:2b / v5 | KKR | 2022 | EPS | -1.21 | Diluted |
+| Test set 3 | qwen3.5:2b / v5 | KKR | 2022 | TotalAssets | 277,077 M | Total Assets |
+| Test set 3 | qwen3.5:2b / v5 | KKR | 2023 | EPS | 4.09 | Diluted |
+| Test set 3 | qwen3.5:2b / v5 | KKR | 2024 | EPS | 3.28 | Net Income (Loss) Attributable to KKR & Co. Inc. Per Share of Common Stock Dilut |
+| Test set 3 | qwen3.5:2b / v5 | TGT | 2022 | NetIncome | 6,946 M | Net earnings from continuing operations |
+| Test set 3 | qwen3.5:4b / v4 | BMY | 2022 | OperatingIncome | 7,713 M | Earnings/(Loss) Before Income Taxes / 7,713 / 8,098 / (6,871) |
+| Test set 3 | qwen3.5:4b / v4 | BMY | 2023 | OperatingIncome | 8,440 M | Earnings Before Income Taxes / 8,440 / 7,713 / 8,098 |
+| Test set 3 | qwen3.5:4b / v4 | HON | 2021 | OperatingIncome | 7,235 M | Income before taxes / 7,235 / 6,012 / 7,559 |
+| Test set 3 | qwen3.5:4b / v4 | HON | 2022 | OperatingIncome | 6,379 M | Income before taxes / 6,379 / 7,235 / 6,012 |
+| Test set 3 | qwen3.5:4b / v4 | HON | 2023 | OperatingIncome | 7,159 M | Income before taxes / 7,159 / 6,379 / 7,235 |
+| Test set 3 | qwen3.5:4b / v4 | KKR | 2021 | EPS | 7.31 | Diluted / $7.31 / $3.37 / $3.54 |
+| Test set 3 | qwen3.5:4b / v4 | KKR | 2021 | TotalAssets | 264,285 M | Total Assets / $264,285,440 / $79,806,502 |
+| Test set 3 | qwen3.5:4b / v4 | KKR | 2022 | EPS | -1.21 | Diluted / $(1.21) / $7.31 / $3.37 |
+| Test set 3 | qwen3.5:4b / v4 | KKR | 2022 | TotalAssets | 277,077 M | Total Assets / $277,077,191 / $264,285,440 |
+| Test set 3 | qwen3.5:4b / v4 | KKR | 2023 | EPS | 4.09 | Diluted / $4.09 / $(0.79) / $7.42 |
+| Test set 3 | qwen3.5:4b / v4 | KKR | 2024 | EPS | 3.28 | Diluted / $3.28 / $4.09 / $(0.79) |
+| Test set 3 | qwen3.5:4b / v4 | KKR | 2025 | EPS | 2.34 | Diluted |
+| Test set 3 | qwen3.5:4b / v4 | MRK | 2021 | OperatingIncome | 13,879 M | Income from Continuing Operations Before Taxes / 13,879 / 5,863 / 7,171 |
+| Test set 3 | qwen3.5:4b / v4 | MRK | 2022 | OperatingIncome | 16,444 M | Income from Continuing Operations Before Taxes / 16,444 / 13,879 / 5,863 |
+| Test set 3 | qwen3.5:4b / v4 | TGT | 2022 | NetIncome | 6,946 M | Net earnings / $6,946 / $4,368 / $3,281 |
+| Test set 3 | qwen3.5:4b / v5 | KKR | 2021 | EPS | 7.31 | Diluted / $7.31 / $3.37 / $3.54 |
+| Test set 3 | qwen3.5:4b / v5 | KKR | 2021 | TotalAssets | 264,285 M | Total Assets / $264,285,440 / $79,806,502 |
+| Test set 3 | qwen3.5:4b / v5 | KKR | 2022 | EPS | -1.21 | Diluted / $(1.21) / $7.31 / $3.37 |
+| Test set 3 | qwen3.5:4b / v5 | KKR | 2022 | TotalAssets | 277,077 M | Total Assets / $277,077,191 / $264,285,440 |
+| Test set 3 | qwen3.5:4b / v5 | KKR | 2023 | EPS | 4.09 | Diluted / $4.09 / $(0.79) / $7.42 |
+| Test set 3 | qwen3.5:4b / v5 | KKR | 2024 | EPS | 3.28 | Diluted / $3.28 / $4.09 / $(0.79) |
+| Test set 3 | qwen3.5:4b / v5 | KKR | 2025 | EPS | 2.34 | Diluted |
+| Test set 3 | qwen3.5:4b / v5 | TGT | 2022 | NetIncome | 6,946 M | Net earnings / $6,946 / $4,368 / $3,281 |
 
 ## All errors
 
@@ -300,6 +404,19 @@ There is no ground truth for these (e.g. banks have no operating income). The ri
 | Test set 1 | qwen3.5:2b / v4 | NEE | 2023 | Revenue | 24,800 M | 28,114 M | Wrong metric (other row) | number taken from another row: OPERATING REVENUES / $28,114 / $20,956 / $17,069 |
 | Test set 1 | qwen3.5:2b / v4 | NEE | 2024 | Revenue | 23,500 M | 24,753 M | Wrong metric (other row) | number taken from another row: OPERATING REVENUES / $24,753 / $28,114 / $20,956 |
 | Test set 1 | qwen3.5:2b / v4 | NEE | 2025 | Revenue | 25,800 M | 27,412 M | Wrong metric (other row) | number taken from another row: OPERATING REVENUES / $27,412 / $24,753 / $28,114 |
+| Test set 1 | qwen3.5:2b / v5 | DIS | 2021 | EPS | 1.09 | 1.11 | Wrong metric (other row) | number taken from another row: Continuing operations / $1.11 / $(1.57) / $6.26 |
+| Test set 1 | qwen3.5:2b / v5 | DIS | 2021 | OperatingIncome | 7,766 M | — | Value missing | model returned no value |
+| Test set 1 | qwen3.5:2b / v5 | DIS | 2022 | EPS | 1.72 | 1.75 | Wrong metric (other row) | number taken from another row: Continuing operations / $1.75 / $1.11 / $(1.57) |
+| Test set 1 | qwen3.5:2b / v5 | DIS | 2022 | OperatingIncome | 12,121 M | — | Value missing | model returned no value |
+| Test set 1 | qwen3.5:2b / v5 | DIS | 2023 | EPS | 1.29 | — | Value missing | model returned no value |
+| Test set 1 | qwen3.5:2b / v5 | DIS | 2023 | OperatingIncome | 12,863 M | — | Value missing | model returned no value |
+| Test set 1 | qwen3.5:2b / v5 | DIS | 2024 | OperatingIncome | 15,601 M | — | Value missing | model returned no value |
+| Test set 1 | qwen3.5:2b / v5 | DIS | 2025 | OperatingIncome | 17,551 M | — | Value missing | model returned no value |
+| Test set 1 | qwen3.5:2b / v5 | NEE | 2021 | Revenue | 18,800 M | 17,069 M | Wrong metric (other row) | number taken from another row: OPERATING REVENUES / $17,069 / $17,997 / $19,204 |
+| Test set 1 | qwen3.5:2b / v5 | NEE | 2022 | Revenue | 23,000 M | 20,956 M | Wrong metric (other row) | number taken from another row: OPERATING REVENUES / $20,956 / $17,069 / $17,997 |
+| Test set 1 | qwen3.5:2b / v5 | NEE | 2023 | Revenue | 24,800 M | 28,114 M | Wrong metric (other row) | number taken from another row: OPERATING REVENUES / $28,114 / $20,956 / $17,069 |
+| Test set 1 | qwen3.5:2b / v5 | NEE | 2024 | Revenue | 23,500 M | 24,753 M | Wrong metric (other row) | number taken from another row: OPERATING REVENUES / $24,753 / $28,114 / $20,956 |
+| Test set 1 | qwen3.5:2b / v5 | NEE | 2025 | Revenue | 25,800 M | 27,412 M | Wrong metric (other row) | number taken from another row: OPERATING REVENUES / $27,412 / $24,753 / $28,114 |
 | Test set 1 | qwen3.5:4b / v3 | BA | 2021 | OperatingIncome | -2,902 M | — | Value missing | model returned no value |
 | Test set 1 | qwen3.5:4b / v3 | BA | 2023 | OperatingIncome | -773 M | 7,724 M | Wrong metric (other row) | number taken from another row: 7,724 / 3,530 / 3,049 |
 | Test set 1 | qwen3.5:4b / v3 | BA | 2025 | NetIncome | 2,235 M | 1,890 M | Wrong metric (other row) | number taken from another row: Net earnings/(loss) attributable to Boeing common shareholders / $ 1,890 / ($ 11,875) / ($ |
@@ -327,6 +444,17 @@ There is no ground truth for these (e.g. banks have no operating income). The ri
 | Test set 1 | qwen3.5:4b / v4 | NEE | 2024 | Revenue | 23,500 M | 24,753 M | Wrong metric (other row) | number taken from another row: OPERATING REVENUES / $24,753 / $28,114 / $20,956 |
 | Test set 1 | qwen3.5:4b / v4 | NEE | 2025 | Revenue | 25,800 M | 27,412 M | Wrong metric (other row) | number taken from another row: OPERATING REVENUES / $27,412 / $24,753 / $28,114 |
 | Test set 1 | qwen3.5:4b / v4 | PFE | 2022 | EPS | 5.47 | 547.00 | Other | number does not appear in the statements |
+| Test set 1 | qwen3.5:4b / v5 | DIS | 2021 | OperatingIncome | 7,766 M | — | Value missing | model returned no value |
+| Test set 1 | qwen3.5:4b / v5 | DIS | 2022 | OperatingIncome | 12,121 M | — | Value missing | model returned no value |
+| Test set 1 | qwen3.5:4b / v5 | DIS | 2023 | OperatingIncome | 12,863 M | — | Value missing | model returned no value |
+| Test set 1 | qwen3.5:4b / v5 | DIS | 2024 | OperatingIncome | 15,601 M | — | Value missing | model returned no value |
+| Test set 1 | qwen3.5:4b / v5 | DIS | 2025 | OperatingIncome | 17,551 M | — | Value missing | model returned no value |
+| Test set 1 | qwen3.5:4b / v5 | NEE | 2021 | Revenue | 18,800 M | 17,069 M | Wrong metric (other row) | number taken from another row: OPERATING REVENUES / $17,069 / $17,997 / $19,204 |
+| Test set 1 | qwen3.5:4b / v5 | NEE | 2022 | Revenue | 23,000 M | 20,956 M | Wrong metric (other row) | number taken from another row: OPERATING REVENUES / $20,956 / $17,069 / $17,997 |
+| Test set 1 | qwen3.5:4b / v5 | NEE | 2023 | Revenue | 24,800 M | 28,114 M | Wrong metric (other row) | number taken from another row: OPERATING REVENUES / $28,114 / $20,956 / $17,069 |
+| Test set 1 | qwen3.5:4b / v5 | NEE | 2024 | Revenue | 23,500 M | 24,753 M | Wrong metric (other row) | number taken from another row: OPERATING REVENUES / $24,753 / $28,114 / $20,956 |
+| Test set 1 | qwen3.5:4b / v5 | NEE | 2025 | Revenue | 25,800 M | 27,412 M | Wrong metric (other row) | number taken from another row: OPERATING REVENUES / $27,412 / $24,753 / $28,114 |
+| Test set 1 | qwen3.5:4b / v5 | PFE | 2022 | EPS | 5.47 | 547.00 | Other | number does not appear in the statements |
 | Test set 2 | qwen3.5:2b / v3 | AIG | 2021 | NetIncome | 9,388 M | 9,923 M | Wrong metric (other row) | matches related XBRL value ProfitLoss |
 | Test set 2 | qwen3.5:2b / v3 | AIG | 2022 | NetIncome | 10,276 M | 11,275 M | Wrong metric (other row) | matches related XBRL value ProfitLoss |
 | Test set 2 | qwen3.5:2b / v3 | AIG | 2023 | EPS | 4.98 | — | Value missing | model returned no value |
@@ -384,6 +512,15 @@ There is no ground truth for these (e.g. banks have no operating income). The ri
 | Test set 2 | qwen3.5:2b / v4 | WBD | 2023 | NetIncome | -3,126 M | -3,079 M | Wrong metric (other row) | matches related XBRL value ProfitLoss |
 | Test set 2 | qwen3.5:2b / v4 | WBD | 2024 | NetIncome | -11,311 M | -11,482 M | Wrong metric (other row) | matches related XBRL value ProfitLoss |
 | Test set 2 | qwen3.5:2b / v4 | WBD | 2025 | NetIncome | 727 M | 749 M | Wrong metric (other row) | matches related XBRL value ProfitLoss |
+| Test set 2 | qwen3.5:2b / v5 | AIG | 2022 | EPS | 13.01 | — | Value missing | model returned no value |
+| Test set 2 | qwen3.5:2b / v5 | AIG | 2024 | EPS | -2.17 | 4.07 | Wrong metric (other row) | number taken from another row: Income (loss) from continuing operations / $4.07 / $3.74 / $3.63 |
+| Test set 2 | qwen3.5:2b / v5 | DUK | 2021 | Revenue | 24,703 M | 25,097 M | Wrong metric (other row) | number taken from another row: Total operating revenues / 25,097 / 23,868 / 25,079 |
+| Test set 2 | qwen3.5:2b / v5 | DUK | 2023 | Revenue | 28,674 M | 29,060 M | Other | earlier column of the correct row (e.g. a note number): Total operating revenues / 29,060 / 28,768 / 24,621 |
+| Test set 2 | qwen3.5:2b / v5 | DUK | 2024 | Revenue | 30,050 M | 30,357 M | Wrong metric (other row) | number taken from another row: Total operating revenues / 30,357 / 29,060 / 28,768 |
+| Test set 2 | qwen3.5:2b / v5 | DUK | 2025 | Revenue | 31,741 M | 32,237 M | Wrong metric (other row) | number taken from another row: Total operating revenues / 32,237 / 30,357 / 29,060 |
+| Test set 2 | qwen3.5:2b / v5 | INTC | 2025 | NetIncome | -267 M | 26 M | Wrong metric (other row) | matches related XBRL value ProfitLoss |
+| Test set 2 | qwen3.5:2b / v5 | T | 2021 | OperatingIncome | 23,347 M | 23 M | Unit error (thousands/millions) | reported unit 'thousands', correct would be 'millions' |
+| Test set 2 | qwen3.5:2b / v5 | T | 2021 | Revenue | 168,864 M | 0 M | Unit error (thousands/millions) | reported unit 'units', correct would be 'millions' |
 | Test set 2 | qwen3.5:4b / v3 | AIG | 2021 | NetIncome | 9,388 M | 9,923 M | Wrong metric (other row) | matches related XBRL value ProfitLoss |
 | Test set 2 | qwen3.5:4b / v3 | AIG | 2022 | NetIncome | 10,276 M | 11,275 M | Wrong metric (other row) | matches related XBRL value ProfitLoss |
 | Test set 2 | qwen3.5:4b / v3 | AIG | 2023 | NetIncome | 3,643 M | 3,878 M | Wrong metric (other row) | matches related XBRL value ProfitLoss |
@@ -409,3 +546,46 @@ There is no ground truth for these (e.g. banks have no operating income). The ri
 | Test set 2 | qwen3.5:4b / v4 | WBD | 2023 | NetIncome | -3,126 M | -3,079 M | Wrong metric (other row) | matches related XBRL value ProfitLoss |
 | Test set 2 | qwen3.5:4b / v4 | WBD | 2024 | NetIncome | -11,311 M | -11,482 M | Wrong metric (other row) | matches related XBRL value ProfitLoss |
 | Test set 2 | qwen3.5:4b / v4 | WBD | 2025 | NetIncome | 727 M | 749 M | Wrong metric (other row) | matches related XBRL value ProfitLoss |
+| Test set 2 | qwen3.5:4b / v5 | DUK | 2021 | Revenue | 24,703 M | 25,097 M | Wrong metric (other row) | number taken from another row: Total operating revenues / 25,097 / 23,868 / 25,079 |
+| Test set 2 | qwen3.5:4b / v5 | DUK | 2023 | Revenue | 28,674 M | 29,060 M | Other | earlier column of the correct row (e.g. a note number): Total operating revenues / 29,060 / 28,768 / 24,621 |
+| Test set 2 | qwen3.5:4b / v5 | DUK | 2024 | Revenue | 30,050 M | 30,357 M | Wrong metric (other row) | number taken from another row: Total operating revenues / 30,357 / 29,060 / 28,768 |
+| Test set 2 | qwen3.5:4b / v5 | DUK | 2025 | Revenue | 31,741 M | 32,237 M | Wrong metric (other row) | number taken from another row: Total operating revenues / 32,237 / 30,357 / 29,060 |
+| Test set 3 | qwen3.5:2b / v4 | BX | 2021 | NetIncome | 5,857 M | 12,375 M | Wrong metric (other row) | matches related XBRL value ProfitLoss |
+| Test set 3 | qwen3.5:2b / v4 | BX | 2022 | NetIncome | 1,748 M | 2,989 M | Wrong metric (other row) | matches related XBRL value ProfitLoss |
+| Test set 3 | qwen3.5:2b / v4 | BX | 2023 | NetIncome | 1,391 M | 2,444 M | Wrong metric (other row) | matches related XBRL value ProfitLoss |
+| Test set 3 | qwen3.5:2b / v4 | BX | 2024 | NetIncome | 2,777 M | 5,438 M | Wrong metric (other row) | matches related XBRL value ProfitLoss |
+| Test set 3 | qwen3.5:2b / v4 | BX | 2025 | NetIncome | 3,019 M | 6,047 M | Wrong metric (other row) | matches related XBRL value ProfitLoss |
+| Test set 3 | qwen3.5:2b / v4 | HON | 2024 | OperatingIncome | 8,699 M | — | Value missing | model returned no value |
+| Test set 3 | qwen3.5:2b / v4 | HON | 2025 | OperatingIncome | 8,127 M | — | Value missing | model returned no value |
+| Test set 3 | qwen3.5:2b / v4 | KKR | 2021 | NetIncome | 4,666 M | 12,295 M | Wrong metric (other row) | matches related XBRL value ProfitLoss |
+| Test set 3 | qwen3.5:2b / v4 | KKR | 2022 | NetIncome | -841 M | -1,024 M | Wrong metric (other row) | matches related XBRL value ProfitLoss |
+| Test set 3 | qwen3.5:2b / v4 | KKR | 2023 | NetIncome | 3,732 M | 5,357 M | Wrong metric (other row) | matches related XBRL value ProfitLoss |
+| Test set 3 | qwen3.5:2b / v4 | KKR | 2024 | NetIncome | 3,076 M | 4,906 M | Wrong metric (other row) | matches related XBRL value ProfitLoss |
+| Test set 3 | qwen3.5:2b / v4 | KKR | 2025 | NetIncome | 2,370 M | — | Value missing | model returned no value |
+| Test set 3 | qwen3.5:2b / v4 | KKR | 2025 | Revenue | 19,464 M | — | Value missing | model returned no value |
+| Test set 3 | qwen3.5:2b / v4 | KKR | 2025 | TotalAssets | 410,144 M | — | Value missing | model returned no value |
+| Test set 3 | qwen3.5:2b / v4 | MET | 2024 | OperatingIncome | 5,996 M | — | Value missing | model returned no value |
+| Test set 3 | qwen3.5:2b / v4 | MET | 2025 | OperatingIncome | 6,137 M | — | Value missing | model returned no value |
+| Test set 3 | qwen3.5:2b / v4 | MRK | 2023 | EPS | 0.14 | — | Value missing | model returned no value |
+| Test set 3 | qwen3.5:2b / v5 | HON | 2024 | OperatingIncome | 8,699 M | — | Value missing | model returned no value |
+| Test set 3 | qwen3.5:2b / v5 | HON | 2025 | OperatingIncome | 8,127 M | — | Value missing | model returned no value |
+| Test set 3 | qwen3.5:2b / v5 | KKR | 2025 | NetIncome | 2,370 M | — | Value missing | model returned no value |
+| Test set 3 | qwen3.5:2b / v5 | KKR | 2025 | Revenue | 19,464 M | — | Value missing | model returned no value |
+| Test set 3 | qwen3.5:2b / v5 | KKR | 2025 | TotalAssets | 410,144 M | — | Value missing | model returned no value |
+| Test set 3 | qwen3.5:2b / v5 | MET | 2024 | OperatingIncome | 5,996 M | — | Value missing | model returned no value |
+| Test set 3 | qwen3.5:2b / v5 | MET | 2025 | OperatingIncome | 6,137 M | — | Value missing | model returned no value |
+| Test set 3 | qwen3.5:2b / v5 | MRK | 2023 | EPS | 0.14 | — | Value missing | model returned no value |
+| Test set 3 | qwen3.5:4b / v4 | GM | 2023 | NetIncome | 10,127 M | 10,022 M | Wrong year (prior-year column) | later column of the correct row: Net income (loss) attributable to stockholders / $10,127 / $9,934 / $10,019 |
+| Test set 3 | qwen3.5:4b / v4 | HON | 2024 | OperatingIncome | 8,699 M | — | Value missing | model returned no value |
+| Test set 3 | qwen3.5:4b / v4 | HON | 2025 | OperatingIncome | 8,127 M | 5,476 M | Wrong metric (other row) | number taken from another row: Selling, general and administrative expenses / 5,450 / 5,235 / 4,887 |
+| Test set 3 | qwen3.5:4b / v4 | KKR | 2022 | NetIncome | -841 M | -1,024 M | Wrong metric (other row) | matches related XBRL value ProfitLoss |
+| Test set 3 | qwen3.5:4b / v4 | KKR | 2024 | NetIncome | 3,076 M | 4,906 M | Wrong metric (other row) | matches related XBRL value ProfitLoss |
+| Test set 3 | qwen3.5:4b / v4 | KKR | 2025 | Revenue | 19,464 M | — | Value missing | model returned no value |
+| Test set 3 | qwen3.5:4b / v4 | MET | 2024 | OperatingIncome | 5,996 M | — | Value missing | model returned no value |
+| Test set 3 | qwen3.5:4b / v4 | MET | 2025 | OperatingIncome | 6,137 M | — | Value missing | model returned no value |
+| Test set 3 | qwen3.5:4b / v5 | GM | 2023 | NetIncome | 10,127 M | 10,022 M | Wrong year (prior-year column) | later column of the correct row: Net income (loss) attributable to stockholders / $10,127 / $9,934 / $10,019 |
+| Test set 3 | qwen3.5:4b / v5 | HON | 2024 | OperatingIncome | 8,699 M | — | Value missing | model returned no value |
+| Test set 3 | qwen3.5:4b / v5 | HON | 2025 | OperatingIncome | 8,127 M | — | Value missing | model returned no value |
+| Test set 3 | qwen3.5:4b / v5 | KKR | 2025 | Revenue | 19,464 M | — | Value missing | model returned no value |
+| Test set 3 | qwen3.5:4b / v5 | MET | 2024 | OperatingIncome | 5,996 M | — | Value missing | model returned no value |
+| Test set 3 | qwen3.5:4b / v5 | MET | 2025 | OperatingIncome | 6,137 M | — | Value missing | model returned no value |

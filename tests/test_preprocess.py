@@ -133,3 +133,17 @@ def test_quarterly_table_is_not_the_statement():
     )
     section = find_statement(f"{statement}\n{quarterly}", INCOME)
     assert section is not None and section.title == "Consolidated Statements of Income (Loss)"
+
+
+def test_title_with_footnote_marker():
+    balance = "Consolidated Balance Sheets (1)\nTotal assets | 479,843\nTotal liabilities | 438,000\n"
+    section = find_statement(balance, BALANCE)
+    assert section is not None and section.title == "Consolidated Balance Sheets (1)"
+
+
+def test_balance_sheet_with_unlabeled_totals():
+    balance = (
+        "Consolidated Balance Sheet\nTotal current assets | 38,782\n$117,106 | $106,675\n"
+        "Total current liabilities | 28,420\n$117,106 | $106,675\n"
+    )
+    assert find_statement(balance, BALANCE) is not None
