@@ -13,6 +13,8 @@ from edgar_extract.edgar import (
     Filing,
     RateLimiter,
     cache_path_for,
+    find_annual_report_exhibit,
+    parse_filing_index,
     parse_filings,
     parse_ticker_map,
 )
@@ -71,6 +73,56 @@ def test_filing_url():
         primary_document="aapl-20240928.htm",
     )
     assert filing.url == "https://www.sec.gov/Archives/edgar/data/320193/000032019324000123/aapl-20240928.htm"
+
+
+FILING_INDEX = """
+<table class="tableFile" summary="Document Format Files">
+<tr><th>Seq</th><th>Description</th><th>Document</th><th>Type</th><th>Size</th></tr>
+<tr><td>1</td><td>10-K</td><td><a href="/ix?doc=/x/x-10k.htm">x-10k.htm</a> iXBRL</td><td>10-K</td><td>1459730</td></tr>
+<tr><td>2</td><td>EX-10.1</td><td><a href="/x/x-ex10.htm">x-ex10.htm</a></td><td>EX-10.1</td><td>69875</td></tr>
+<tr><td>3</td><td>EX-13</td><td><a href="/ix?doc=/x/x-ex13.htm">x-ex13.htm</a> iXBRL</td><td>EX-13</td><td>11508989</td></tr>
+<tr><td></td><td>Complete submission text file</td><td><a href="/x/x.txt">x.txt</a></td><td></td><td>54190023</td></tr>
+</table>
+<table class="tableFile" summary="Data Files">
+<tr><td>4</td><td>EX-101.SCH</td><td><a href="/x/x.xsd">x.xsd</a></td><td>EX-101.SCH</td><td>227736</td></tr>
+</table>
+"""
+
+
+def test_parse_filing_index_lists_documents_with_their_type():
+    documents = parse_filing_index(FILING_INDEX)
+    assert documents == [("10-K", "x-10k.htm"), ("EX-10.1", "x-ex10.htm"), ("EX-13", "x-ex13.htm")]
+    assert find_annual_report_exhibit(documents) == "x-ex13.htm"
+    assert find_annual_report_exhibit([("EX-13.1", "a.htm")]) == "a.htm"
+    assert find_annual_report_exhibit([("EX-10.13", "b.htm"), ("EX-131", "c.htm")]) is None
+
+
+def test_download_annual_report_exhibit_uses_filing_index(tmp_path):
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if str(request.url).endswith("-index.htm"):
+            return httpx.Response(200, text=FILING_INDEX)
+        return httpx.Response(200, content=b"<html>annual report</html>")
+
+    filing = Filing(
+        cik=51143,
+        form="10-K",
+        accession_number="0001558370-22-001584",
+        filing_date=date(2022, 2, 22),
+        report_date=date(2021, 12, 31),
+        primary_document="x-10k.htm",
+    )
+    client = make_client(tmp_path, handler)
+    path = client.download_annual_report_exhibit(filing)
+    assert path is not None and path.read_bytes() == b"<html>annual report</html>"
+    assert [str(r.url) for r in seen] == [
+        "https://www.sec.gov/Archives/edgar/data/51143/000155837022001584/0001558370-22-001584-index.htm",
+        "https://www.sec.gov/Archives/edgar/data/51143/000155837022001584/x-ex13.htm",
+    ]
+    client.download_annual_report_exhibit(filing)  # second time: from the cache
+    assert len(seen) == 2
 
 
 def test_cache_path_is_readable(tmp_path):

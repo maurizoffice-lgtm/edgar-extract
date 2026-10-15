@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from edgar_extract import db
 from edgar_extract.preprocess import (
     STATEMENTS,
     answer_in_text,
@@ -9,6 +10,7 @@ from edgar_extract.preprocess import (
     extract_financial_sections,
     find_statement,
     html_to_text,
+    preprocess_filing,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -147,3 +149,100 @@ def test_balance_sheet_with_unlabeled_totals():
         "Total current liabilities | 28,420\n$117,106 | $106,675\n"
     )
     assert find_statement(balance, BALANCE) is not None
+
+
+def test_statement_continued_on_next_page_is_joined():
+    text = (
+        "CONSOLIDATED STATEMENTS OF OPERATIONS\n(Amounts in Thousands)\n"
+        "Total Revenues | 19,464,307 | 21,878,698\nIncome Before Taxes | 7,099,160 | 5,860,433\n164\n"
+        "CONSOLIDATED STATEMENTS OF OPERATIONS (CONTINUED)\n(Amounts in Thousands)\n"
+        "Net Income | 6,145,412 | 4,906,037\nDiluted earnings per share | $ 2.34 | $ 3.28\n165\n"
+        "CONSOLIDATED STATEMENTS OF CASH FLOWS\nNet Income | 6,145,412 | 4,906,037\n"
+    )
+    section = find_statement(text, INCOME)
+    assert section is not None and section.title == "CONSOLIDATED STATEMENTS OF OPERATIONS"
+    kept = text[section.start : section.end]
+    assert "Total Revenues" in kept and "Diluted earnings per share" in kept
+    assert "CASH FLOWS" not in kept
+
+
+def test_continued_page_of_another_statement_is_not_joined():
+    text = (
+        "Consolidated Statements of Income\nNet income | 1,000\nDiluted earnings per share | 1.00\n"
+        "Consolidated Statements of Cash Flows (continued)\nNet income | 1,000\n"
+    )
+    section = find_statement(text, INCOME)
+    assert section is not None and "Cash Flows" not in text[section.start : section.end]
+
+
+def _filing_db(tmp_path: Path) -> Path:
+    db_path = tmp_path / "test.db"
+    with db.connect(db_path) as conn:
+        conn.execute(
+            "INSERT INTO filings (accession_number, ticker, cik, form, filing_date, report_date, fiscal_year, "
+            "primary_document, url) VALUES ('acc-1', 'X', 1, '10-K', '2026-02-01', '2025-12-31', 2025, 'main.htm', '')"
+        )
+    return db_path
+
+
+def test_statements_taken_from_exhibit_when_main_document_has_none(tmp_path, monkeypatch):
+    monkeypatch.setattr("edgar_extract.preprocess.PROCESSED_DIR", tmp_path / "processed")
+    monkeypatch.setattr("edgar_extract.preprocess.DATA_DIR", tmp_path)
+    main_document = tmp_path / "main.htm"
+    main_document.write_text("<p>Item 8. Incorporated by reference to the 2025 Annual Report.</p>")
+    exhibit = tmp_path / "ex13.htm"
+    exhibit.write_bytes((FIXTURES / "mini_10k.htm").read_bytes())
+    db_path = _filing_db(tmp_path)
+
+    result = preprocess_filing("acc-1", main_document, db_path, find_exhibit=lambda: exhibit)
+    assert result.method == "sections" and result.source_document == "ex13.htm"
+    with db.connect(db_path) as conn:
+        row = conn.execute("SELECT method, source_document FROM preprocessing").fetchone()
+    assert tuple(row) == ("sections", "ex13.htm")
+
+
+def test_exhibit_is_not_looked_up_when_main_document_has_statements(tmp_path, monkeypatch):
+    monkeypatch.setattr("edgar_extract.preprocess.PROCESSED_DIR", tmp_path / "processed")
+    monkeypatch.setattr("edgar_extract.preprocess.DATA_DIR", tmp_path)
+    main_document = tmp_path / "main.htm"
+    main_document.write_bytes((FIXTURES / "mini_10k.htm").read_bytes())
+
+    def find_exhibit():
+        raise AssertionError("must not be called")
+
+    result = preprocess_filing("acc-1", main_document, _filing_db(tmp_path), find_exhibit=find_exhibit)
+    assert result.source_document == "main.htm"
+
+
+def test_zero_width_spaces_count_as_empty_cells():
+    html = "<table><tr><td>Net income</td><td>​</td><td>$</td><td>1,639</td></tr></table><p>​</p>"
+    assert html_to_text(html) == "Net income | $1,639"
+
+
+def test_title_with_page_number_and_company_name():
+    statement = "Net income | 10,593 | 6,023\nDiluted earnings per share | 11.17 | 6.43\n"
+    for title in (
+        "42 | Consolidated Income Statement Acme Corporation and Subsidiary Companies",
+        "46Consolidated Income Statement",
+    ):
+        section = find_statement(f"{title}\n{statement}", INCOME)
+        assert section is not None and section.title == title
+
+
+def test_long_title_line_ends_the_previous_statement():
+    text = (
+        "Consolidated Income Statement\nNet income | 10,593\nDiluted earnings per share | 11.17\n"
+        "Consolidated Statement of Comprehensive Income Acme Corporation and Subsidiary Companies | 43\n"
+        "Other comprehensive income | 1,234\n"
+    )
+    section = find_statement(text, INCOME)
+    assert section is not None and "Other comprehensive income" not in text[section.start : section.end]
+
+
+def test_balance_sheet_continued_page_is_not_joined():
+    text = (
+        "Consolidated Balance Sheets\nTotal assets | 410,144\nTotal liabilities | 328,512\n"
+        "Consolidated Balance Sheets (Continued)\nBalances of consolidated funds | 93,170\n"
+    )
+    section = find_statement(text, BALANCE)
+    assert section is not None and "consolidated funds" not in text[section.start : section.end]

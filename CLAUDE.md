@@ -197,18 +197,39 @@ Version 5 (targets the three v4 error types left on test set 2; measured on test
   silently changed v4's results (test set 2 2b 335 → 340). Every behavior change needs its own
   version flag; after any change, check that the old versions reproduce their numbers.
 - Results v4 → v5: dev 100 % both. Test set 1: 2b 97 → 97 % (456 → 457), 4b 97 → 98 %.
-  Test set 2: 2b 95 → 97 %, 4b 97 → 99 %. Test set 3 (unseen, 281 graded): 2b 94 → 97 %
-  (264 → 273), 4b 97 → 98 % (273 → 275). No v4-correct value became wrong. Guessed operating
-  income (no ground truth) → 0 on all sets (test set 3: 2b 3 → 0, 4b 7 → 0 of 36).
+  Test set 2: 2b 95 → 97 %, 4b 97 → 99 %. Test set 3 (all 75 filings, 321 graded): 2b 94 → 98 %
+  (303 → 314), 4b 97 → 98 % (312 → 316). No v4-correct value became wrong. Guessed operating
+  income (no ground truth) → 0 on all sets except 2b on test set 3 (6 → 3 of 46: WFC
+  2021–2023 "Operating losses", a bank expense row; 4b 9 → 0). (Before WFC/IBM were added:
+  65 filings, 281 graded, 2b 264 → 273, 4b 273 → 275.)
 - Test set 3 findings: BX and KKR have a "redeemable" noncontrolling row (9 of 2b's 17 v4
-  errors). Ground-truth artifacts: HON and MET 2024/2025 OperatingIncome (no such line in the
-  statement). GM 2023 "attributable to common stockholders" is not fixed (no printed row in between).
+  errors on the first 65 filings). Ground-truth artifacts: HON and MET 2024/2025
+  OperatingIncome (no such line in the statement). GM 2023 "attributable to common
+  stockholders" is not fixed (no printed row in between). 2b leaves IBM 2024/2025 EPS empty
+  ("Assuming dilution" is a heading above continuing/discontinued/total rows). Not fixed:
+  test set 3 stays unseen until a fourth set exists.
 - Preprocessing before the test-set-3 extraction (185 earlier texts byte-identical): footnote
   marker in titles ("Consolidated Balance Sheets (1)", SCHW), balance sheet with unlabeled
-  totals ("Total current assets/liabilities", MRK). WFC and IBM have their statements in an
-  exhibit (EX-13), not in the main document → `extract` skips filings whose preprocessing
-  method is not "sections", and the report lists them as "Not extracted". KKR 2025: income
-  statement split over two pages, only the "(CONTINUED)" page is kept (revenue missing).
+  totals ("Total current assets/liabilities", MRK). `extract` skips filings whose preprocessing
+  method is not "sections"; the report lists them as "Not extracted" (none left).
+- Exhibit + continued pages (after v5 was measured on the other 13 companies; before any model
+  saw WFC/IBM; 249 other texts byte-identical, only WFC ×5, IBM ×5, KKR 2025 changed):
+  - WFC and IBM have their statements in the annual-report exhibit (EX-13). If the main
+    document has no statements, `preprocess` calls `EdgarClient.download_annual_report_exhibit`
+    (filing index `{accession}-index.htm` → document of type `EX-13`/`EX-13.n`, cached) and
+    searches the exhibit. `preprocessing.source_document` stores which file was used (added
+    to old DBs via `db.ADDED_COLUMNS`). The SEC client is only created when needed.
+  - IBM title lines are page headers: "42 | Consolidated Income Statement International
+    Business Machines Corporation and Subsidiary Companies" / "46Consolidated Income
+    Statement". `_title_remainder` strips a page-number cell and "and Subsidiar(y|ies)
+    (Companies)"; every title line is now also a stop (not only lines ≤ 100 chars). IBM
+    2021/2022 fill empty cells with zero-width spaces (U+200B) → treated as whitespace.
+  - KKR 2025: the income statement's "(CONTINUED)" page was the only one kept. Income
+    statements (`join_continued`) now join a following "(Continued)" page with the same title.
+    Not for balance sheets: KKR's balance-sheet "(CONTINUED)" pages include a VIE table.
+    This fix was made after seeing KKR's v5 result → KKR is no longer unseen.
+  - Coverage on test set 3: 317/321 (misses = HON/MET artifacts). Model time for the 11 new
+    texts: ~4 min (4b) + ~2 min (2b).
 
 ## Layout
 ```

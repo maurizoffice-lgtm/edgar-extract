@@ -3,12 +3,12 @@
 > How accurately can a small, free LLM pull five financial metrics out of an SEC 10-K?
 > This project measures it against the companies' own XBRL data, explains every error,
 > and improves the pipeline measurably — from **75 % to 100 %** on the development set for a
-> 2-billion-parameter model running on a laptop, at a cost of **$0**. On **13 companies chosen
-> before the latest version was written**, the 2b model scores **97 %** (v4: 94 %) and the
+> 2-billion-parameter model running on a laptop, at a cost of **$0**. On **15 companies chosen
+> before the latest version was written**, the 2b model scores **98 %** (v4: 94 %) and the
 > 4b model **98 %** (v4: 97 %).
 
 **Status:** ✅ development set (5 companies × 2 years) + three held-out test sets
-(20 + 15 + 13 companies × 5 years, 240 filings) · pipeline v5.
+(20 + 15 + 15 companies × 5 years, 250 filings) · pipeline v5.
 
 ![Dashboard overview: accuracy by model and version](docs/dashboard-overview.jpg)
 
@@ -42,7 +42,8 @@ flowchart LR
     S --> D["download.py<br/>ticker → CIK → 10-Ks<br/>rate-limited, cached"]
     H --> D
     X --> G["ground_truth.py<br/>match by accession number<br/>+ fiscal-year end"]
-    D --> P["preprocess.py<br/>HTML → text<br/>keep income statement<br/>+ balance sheet (0.9 %)"]
+    D --> P["preprocess.py<br/>HTML → text<br/>keep income statement<br/>+ balance sheet (0.8 %)"]
+    H -- "EX-13 exhibit, only if the<br/>10-K has no statements" --> P
     P --> E["extract.py + llm.py<br/>tool call: value · unit · quote<br/>v3: scale read in code<br/>v4: loss rows + net income checked in code<br/>v5: common-shareholder rows, several<br/>noncontrolling rows, no pre-tax guesses"]
     O["Ollama (local)<br/>qwen3.5:4b · qwen3.5:2b"] <--> E
     G --> DB[("SQLite<br/>data/edgar.db")]
@@ -77,22 +78,22 @@ Four data sets (defined in [`datasets.py`](src/edgar_extract/datasets.py)):
 - **Test set 3:** 15 companies chosen *before* v5 was written and never used for tuning,
   × latest 5 10-Ks — MS, SCHW (bank/broker), MET (insurer), BX, KKR, GM, KMI (noncontrolling
   interests, some in several rows), MRK, BMY, HON (no operating income line), TGT (fiscal year
-  ends in January), CSCO (July), ADBE (November/December), plus WFC and IBM. WFC and IBM put
-  their financial statements in an exhibit instead of the main 10-K, which the pipeline does
-  not read yet, so their 10 filings were not extracted: **65 filings from 13 companies.
-  This is the honest measure for v5.**
+  ends in January), CSCO (July), ADBE (November/December), WFC (bank) and IBM. WFC and IBM put
+  their financial statements in an exhibit (the annual report to shareholders) instead of the
+  main 10-K; the pipeline reads that exhibit when the 10-K has no statements.
+  **75 filings from 15 companies. This is the honest measure for v5.**
 
 A value is correct if it is within 0.5 % of the XBRL value. Metrics a company does not
 report (no ground truth) are not graded.
 
 ### v5: fixing the three error types left on test set 2
 
-| Model / version | Development (44) | Test set 1 (470) | Test set 2 (351) | **Test set 3 (281)** | Test set 3, values printed in the statements (276) |
+| Model / version | Development (44) | Test set 1 (470) | Test set 2 (351) | **Test set 3 (321)** | Test set 3, values printed in the statements (317) |
 |---|---|---|---|---|---|
-| qwen3.5:2b / v4 | 100 % | 97 % | 95 % | 94 % (264) | 96 % (264) |
-| qwen3.5:2b / **v5** | **100 %** | **97 %** | **97 %** | **97 % (273)** | **99 % (273)** |
-| qwen3.5:4b / v4 | 100 % | 97 % | 97 % | 97 % (273) | 99 % (273) |
-| qwen3.5:4b / **v5** | **100 %** | **98 %** | **99 %** | **98 % (275)** | **>99 % (275)** |
+| qwen3.5:2b / v4 | 100 % | 97 % | 95 % | 94 % (303) | 96 % (303) |
+| qwen3.5:2b / **v5** | **100 %** | **97 %** | **97 %** | **98 % (314)** | **99 % (314)** |
+| qwen3.5:4b / v4 | 100 % | 97 % | 97 % | 97 % (312) | 98 % (312) |
+| qwen3.5:4b / **v5** | **100 %** | **98 %** | **99 %** | **98 % (316)** | **>99 % (316)** |
 
 v5 = v4 + three checks in code. The prompt is unchanged, so v5 reuses v4's cached model
 answers: it costs no extra model time. Each check is a general rule and only fires where the
@@ -110,22 +111,26 @@ numbers prove it:
    the model's operating income is an income-before-taxes row ("before … tax", "pre-tax")
    and none is labeled operating, the value is removed.
 
-On the unseen **test set 3** the 2b model's errors drop from 17 to 8 (Blackstone and KKR:
-two noncontrolling rows) and the 4b model's from 8 to 6. Guessed operating incomes where the
-company reports none drop to **0** on every data set (test set 3: 2b 3 → 0, 4b 7 → 0 of 36).
-**No value that v4 had right is wrong in v5**, on any data set.
+On the unseen **test set 3** the 2b model's errors drop from 18 to 7 (Blackstone and KKR:
+two noncontrolling rows; Wells Fargo: "applicable to common stock") and the 4b model's from
+9 to 5. Guessed operating incomes where the company reports none drop on every data set, to
+**0** everywhere except three Wells Fargo values of the 2b model (test set 3: 2b 6 → 3,
+4b 9 → 0 of 46; see below). **No value that v4 had right is wrong in v5**, on any data set.
 
 What is left on test set 3 (v5):
 
-- **Ground-truth artifacts (5 values per model):** Honeywell and MetLife (2024, 2025) report
+- **Ground-truth artifacts (4 values per model):** Honeywell and MetLife (2024, 2025) report
   no operating income line, but XBRL has an `OperatingIncomeLoss` value from elsewhere in the
-  filing. The models correctly leave it empty, and it is graded as "missing". KKR 2025 splits its
-  income statement over two pages; preprocessing keeps only the second page, which has no
-  revenue. The last column leaves these 5 values out.
-- 2b: KKR 2025 left empty, and one Merck EPS left empty.
+  filing. The models correctly leave it empty, and it is graded as "missing". The last column
+  leaves these 4 values out.
+- 2b: diluted EPS left empty for IBM 2024 and 2025 (IBM prints "Assuming dilution" as a
+  heading above "Continuing operations / Discontinued operations / Total") and for Merck 2023.
+- 2b, not graded (no ground truth): for Wells Fargo 2021–2023 it reports the row "Operating
+  losses" as operating income. At a bank this is an *expense* (losses from fraud, litigation,
+  errors), not operating income. Not fixed: test set 3 must stay unseen.
 - 4b: General Motors 2023 net income "attributable to common stockholders". The difference
   is not printed as a row in between, so the check (rightly) does not fire.
-- Code corrections are applied a lot: on test set 3, v5 corrected 41 values for 2b and 18 for 4b.
+- Code corrections are applied a lot: on test set 3, v5 corrected 43 values for 2b and 22 for 4b.
 
 ### v4: fixing the two error types found on test set 1
 
@@ -345,11 +350,24 @@ numbers from the cache.
   - Merck prints total assets and total liabilities and equity without a label ("$117,106").
     The balance sheet is now also recognized by "Total current assets/liabilities".
   - Wells Fargo and IBM put their financial statements in an exhibit (the annual report to
-    shareholders), not in the main 10-K. These filings are now skipped instead of sending
-    the whole 10-K to the model (see next steps).
-  - KKR 2025 splits its income statement over two pages with the same title, and only the
-    second page is kept (1 revenue value missing; not fixed).
-  - Coverage on test set 3: 276/281 (the 5 misses are listed above).
+    shareholders, "EX-13"), not in the main 10-K; the 10-K only refers to it. When no
+    statements are found in the 10-K, the pipeline now looks up the filing index on sec.gov,
+    downloads the EX-13 exhibit (cached, like every SEC call) and searches that instead.
+  - IBM's exhibit prints each title as a page header: "42 | Consolidated Income Statement
+    International Business Machines Corporation and Subsidiary Companies" (older years:
+    "46Consolidated Income Statement"). A page number and an "… and Subsidiaries" name are now
+    allowed next to a title, and every recognized title ends the previous statement, even on a
+    long line. Its older exhibits also fill empty table cells with an invisible zero-width
+    space, which is now treated as a space.
+  - KKR 2025 splits its income statement over two pages: the first page (revenue) ends where
+    the second, titled "… (CONTINUED)" (net income, EPS), begins, so only the second page was
+    kept. A "(Continued)" page of the same income statement is now joined to the first page.
+    Only for the income statement: KKR's balance-sheet "(Continued)" pages hold another table.
+  - These fixes came *after* v5 had been measured on the other 13 companies (but before any
+    model saw the Wells Fargo and IBM filings). The KKR fix was made after seeing KKR's
+    result, so KKR is not unseen any more (v5 on KKR: 2b 10 → 13, 4b 12 → 13 of 13 correct).
+    All 249 other texts stayed byte-identical.
+  - Coverage on test set 3: 317/321 (the 4 misses are the Honeywell/MetLife cases above).
 - In 2026 ExxonMobil moved its ticker to a new holding company without 10-Ks yet; its
   filings are found under the predecessor's CIK.
 
@@ -362,10 +380,11 @@ numbers from the cache.
 
 \* Apple M1 Pro, 16 GB, Ollama 0.40, v4, all 185 filings. The v4 run took ~48 min (4b) +
 ~20 min (2b). The code checks of v4 and v5 add no measurable time; test set 3 (65 filings)
-took ~16 min (4b) + ~7 min (2b).
+took ~16 min (4b) + ~7 min (2b), the 11 filings added later (Wells Fargo, IBM, KKR 2025)
+~4 min (4b) + ~2 min (2b).
 
-- **Preprocessing does the heavy lifting:** the 185 full 10-Ks are ~23.4 million tokens
-  (estimated), the two statements sent to the model ~203,000 (0.9 %).
+- **Preprocessing does the heavy lifting:** the 260 full 10-Ks (or their EX-13 exhibits) are
+  ~35.8 million tokens (estimated), the two statements sent to the model ~287,000 (0.8 %).
 - SEC data is free; the whole project cost **$0**.
 - For comparison only (not run): at list prices of Oct 2026, `claude-haiku-5-5`
   ($0.10 / $0.50 per million input/output tokens) would cost roughly **$0.0005 per
@@ -378,9 +397,10 @@ took ~16 min (4b) + ~7 min (2b).
 - Test sets 2 and 3 were chosen with companies that have the targeted problems on purpose
   (losses, noncontrolling interests, preferred dividends, no operating income line), to test
   each version where it matters. Their scores are therefore not a random sample of all companies.
-- Companies that put their statements in an exhibit (Wells Fargo, IBM) are not covered yet.
+- Statements in an exhibit are only looked for in the annual-report exhibit (EX-13), and only
+  if the 10-K itself has none.
 - The preprocessing fixes above were made after looking at held-out filings (but before any
-  model saw them, and without touching prompts). They are general rules, not company names.
+  model saw them, except KKR 2025, and without touching prompts). They are general rules, not company names.
 - The v4/v5 code checks rely on common row labels and on the model finding revenue; a filing
   whose loss rows use unusual labels is not filled. The checks only fire where the printed
   numbers add up — a difference that is not printed as a row (GM 2023) is left alone.
@@ -397,8 +417,8 @@ took ~16 min (4b) + ~7 min (2b).
 
 ## Next steps
 
-1. Read the financial statements from an exhibit when the main 10-K has none (Wells Fargo,
-   IBM), and join income statements split over two pages (KKR 2025).
+1. A fourth, unseen test set — needed before fixing anything found on test set 3 (e.g. a
+   bank's "Operating losses" row taken as operating income, IBM's EPS layout).
 2. Keep empty table cells / the note column in preprocessing so columns line up
    (root cause of error 3), and measure it as its own version.
 3. Stricter quote check: the quote must contain the reported number.

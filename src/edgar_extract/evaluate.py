@@ -348,8 +348,9 @@ def build_report(evals: pd.DataFrame, runs: pd.DataFrame, skipped: list[str] = (
         )
     if skipped:
         lines.append(
-            f"- **Not extracted:** {', '.join(skipped)} — the financial statements are not in the main "
-            "10-K document (e.g. in an exhibit), so these filings were not sent to the models."
+            f"- **Not extracted:** {', '.join(skipped)} — the financial statements were found neither in "
+            "the main 10-K document nor in an annual-report exhibit (EX-13), so these filings were not "
+            "sent to the models."
         )
     lines += ["", "## Overall accuracy", ""]
 

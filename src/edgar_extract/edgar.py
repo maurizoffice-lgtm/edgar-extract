@@ -10,6 +10,7 @@ matching file under data/cache/.
 """
 
 import json
+import re
 import time
 from collections.abc import Callable
 from datetime import date
@@ -17,6 +18,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
+from bs4 import BeautifulSoup
 from pydantic import BaseModel
 
 from edgar_extract.config import CACHE_DIR, get_sec_user_agent
@@ -24,6 +26,12 @@ from edgar_extract.config import CACHE_DIR, get_sec_user_agent
 TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 SUBMISSIONS_URL = "https://data.sec.gov/submissions/{name}"
 ARCHIVES_URL = "https://www.sec.gov/Archives/edgar/data/{cik}/{accession}/{document}"
+# The filing index lists every document of a filing (main document, exhibits, XBRL files).
+INDEX_DOCUMENT = "{accession}-index.htm"
+
+# Some companies put their financial statements not in the 10-K itself but in the
+# annual report to shareholders, attached as exhibit 13 (e.g. "EX-13" or "EX-13.1").
+ANNUAL_REPORT_EXHIBIT = re.compile(r"EX-13(?:\.\d+)?", re.I)
 
 # Stay safely below the SEC limit of 10 requests per second.
 MAX_REQUESTS_PER_SECOND = 8
@@ -48,10 +56,18 @@ class Filing(BaseModel):
 
     @property
     def url(self) -> str:
+        return self.document_url(self.primary_document)
+
+    @property
+    def index_url(self) -> str:
+        return self.document_url(INDEX_DOCUMENT.format(accession=self.accession_number))
+
+    def document_url(self, document: str) -> str:
+        """URL of any document that belongs to this filing (e.g. an exhibit)."""
         return ARCHIVES_URL.format(
             cik=self.cik,
             accession=self.accession_number.replace("-", ""),
-            document=self.primary_document,
+            document=document,
         )
 
 
@@ -116,6 +132,30 @@ def parse_filings(cik: int, block: dict, forms: tuple[str, ...] = ("10-K",)) -> 
         for form, accession, filing_date, report_date, document in rows
         if form in forms and report_date and document
     ]
+
+
+def parse_filing_index(html: bytes | str) -> list[tuple[str, str]]:
+    """Turn a filing index page into [(document type, file name), ...], e.g. ("EX-13", "x-ex13.htm").
+
+    The index has a table "Document Format Files" with the columns
+    Seq | Description | Document | Type | Size. Inline-XBRL documents show "file.htm iXBRL".
+    """
+    soup = BeautifulSoup(html, "lxml")
+    documents = []
+    for table in soup.find_all("table", summary="Document Format Files"):
+        for row in table.find_all("tr"):
+            cells = [cell.get_text(" ").split() for cell in row.find_all("td")]
+            if len(cells) >= 4 and cells[2] and cells[3]:
+                documents.append((cells[3][0], cells[2][0]))
+    return documents
+
+
+def find_annual_report_exhibit(documents: list[tuple[str, str]]) -> str | None:
+    """File name of the annual-report exhibit (EX-13) as an HTML document, or None."""
+    for doc_type, document in documents:
+        if ANNUAL_REPORT_EXHIBIT.fullmatch(doc_type) and document.lower().endswith((".htm", ".html")):
+            return document
+    return None
 
 
 class EdgarClient:
@@ -197,3 +237,16 @@ class EdgarClient:
         """Download the filing's main document (if not cached) and return its path."""
         self.fetch(filing.url)
         return cache_path_for(filing.url, self.cache_dir)
+
+    def download_annual_report_exhibit(self, filing: Filing) -> Path | None:
+        """Download the filing's annual-report exhibit (EX-13), if it has one, and return its path.
+
+        Needed when the 10-K itself only refers to the financial statements
+        ("incorporated by reference" from the annual report to shareholders).
+        """
+        document = find_annual_report_exhibit(parse_filing_index(self.fetch(filing.index_url)))
+        if document is None:
+            return None
+        url = filing.document_url(document)
+        self.fetch(url)
+        return cache_path_for(url, self.cache_dir)

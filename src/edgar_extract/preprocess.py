@@ -14,20 +14,25 @@ recognized by
 4. many numbers right after it, and
 5. no quarterly columns ("Three Months Ended") in its header.
 
+An income statement printed over two pages repeats its title with "(Continued)"; both pages are kept.
+If the 10-K itself has no statements (they are in the annual report to shareholders,
+exhibit 13), the exhibit is downloaded and searched instead.
+
 Usage:
     python -m edgar_extract.preprocess      # all filings in the database
 """
 
 import re
 import warnings
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 
 from edgar_extract import db
 from edgar_extract.config import CACHE_DIR, DATA_DIR
-from edgar_extract.edgar import cache_path_for
+from edgar_extract.edgar import EdgarClient, Filing, cache_path_for
 
 PROCESSED_DIR = DATA_DIR / "processed"
 
@@ -35,6 +40,8 @@ PROCESSED_DIR = DATA_DIR / "processed"
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
 BLOCK_TAGS = ["p", "div", "tr", "li", "h1", "h2", "h3", "h4", "h5", "h6", "table"]
+# Some documents fill "empty" table cells with an invisible zero-width space; treat it as a space.
+ZERO_WIDTH_SPACE = "\u200b"
 
 # ---------------------------------------------------------------- HTML -> text
 
@@ -48,7 +55,7 @@ def _table_to_text(table) -> str:
     for row in table.find_all("tr"):
         cells: list[str] = []
         for cell in row.find_all(["td", "th"]):
-            text = " ".join(cell.get_text(" ").split())
+            text = " ".join(cell.get_text(" ").replace(ZERO_WIDTH_SPACE, " ").split())
             text = re.sub(r"\(\s+", "(", re.sub(r"\s+\)", ")", text))  # "( 321 )" -> "(321)"
             if not text:
                 continue
@@ -85,7 +92,7 @@ def html_to_text(html: bytes | str) -> str:
     for tag in soup.find_all(BLOCK_TAGS):
         tag.append("\n")
 
-    lines = (" ".join(line.split()) for line in soup.get_text().splitlines())
+    lines = (" ".join(line.replace(ZERO_WIDTH_SPACE, " ").split()) for line in soup.get_text().splitlines())
     return "\n".join(line for line in lines if line)
 
 
@@ -122,8 +129,15 @@ NOT_A_TITLE = re.compile(
 TITLE_DATE = re.compile(r"\b(?:for the (?:fiscal )?years? ended|at|as of) [a-z]+ \d{1,2},?$", re.I)
 # ... or with a footnote marker, e.g. "Consolidated Balance Sheets (1)".
 FOOTNOTE_MARKER = re.compile(r"\(\d\)$")
-# Any short line naming a statement ends the previous section.
+# A page header can put the page number in its own cell (or right before the title) and add
+# the company's full name: "42 | Consolidated Income Statement Acme Corporation and Subsidiary
+# Companies", "46Consolidated Income Statement".
+PAGE_NUMBER_CELL = re.compile(r"^\d{1,3}(?: \||$)|\| \d{1,3}$")
+SUBSIDIARIES = re.compile(r",? and (?:its )?subsidiar(?:y|ies)(?: companies)?$", re.I)
+# Any short line naming a statement ends the previous section ...
 MAX_STOP_LINE = 100
+# ... unless it repeats the same title on the next page (see StatementKind.join_continued).
+CONTINUED = re.compile(r"\(continued\)", re.I)
 
 NUMBER = re.compile(r"\d{1,3}(?:,\d{3})+|\d+\.\d{2}\b")
 # Quarterly tables (e.g. a "Quarterly financial data" note) have more columns, hence more numbers.
@@ -138,6 +152,10 @@ class StatementKind:
     name: str
     title: str
     required: list[list[str]]  # every inner list needs at least one match (lower-case)
+    # Keep a "(Continued)" page of the same statement. Only for the income statement: its
+    # second page holds net income and EPS. A balance sheet's "(Continued)" page can be
+    # another table (e.g. balances of consolidated funds), and total assets is on page one.
+    join_continued: bool = False
 
 
 STATEMENTS = [
@@ -149,6 +167,7 @@ STATEMENTS = [
             ["net income", "net earnings", "net loss", "net (loss", "net (income", "net (earnings", "profit"],
             ["per share", "per common share", "dilut"],
         ],
+        join_continued=True,
     ),
     StatementKind(
         name="balance_sheet",
@@ -186,19 +205,35 @@ def _matching_lines(text: str, pattern: str):
         yield line_start, line.strip(), remainder
 
 
+def _title_remainder(remainder: str) -> str:
+    """What is left of a title line besides the title: page number, footnote, date and
+    "... and Subsidiaries" are allowed, so they are removed first."""
+    remainder = FOOTNOTE_MARKER.sub("", PAGE_NUMBER_CELL.sub("", remainder).strip()).strip()
+    return SUBSIDIARIES.sub("", TITLE_DATE.sub("", remainder).strip()).strip()
+
+
 def _title_lines(text: str, pattern: str) -> list[tuple[int, str]]:
     """Positions (line start) of lines that are a statement title on their own."""
     titles = []
     for start, line, remainder in _matching_lines(text, pattern):
-        remainder = TITLE_DATE.sub("", FOOTNOTE_MARKER.sub("", remainder).strip()).strip()
+        remainder = _title_remainder(remainder)
         if len(remainder) <= MAX_TITLE_REMAINDER and not NOT_A_TITLE.search(remainder):
             titles.append((start, line))
     return titles
 
 
 def _stop_positions(text: str) -> list[int]:
-    """Line starts of every short line that names any financial statement."""
-    return sorted({start for start, line, _ in _matching_lines(text, ANY_TITLE) if len(line) <= MAX_STOP_LINE})
+    """Line starts of every short line that names any financial statement, and of every
+    statement title (a page header with the company name can be longer than MAX_STOP_LINE)."""
+    short_lines = {start for start, line, _ in _matching_lines(text, ANY_TITLE) if len(line) <= MAX_STOP_LINE}
+    return sorted(short_lines | {start for start, _ in _title_lines(text, ANY_TITLE)})
+
+
+def _is_continuation(text: str, pos: int, kind: StatementKind) -> bool:
+    """Is the line at pos the same statement's title again, marked "(Continued)"?"""
+    line_end = text.find("\n", pos)
+    line = text[pos : len(text) if line_end == -1 else line_end]
+    return bool(CONTINUED.search(line) and re.search(kind.title, line, re.I))
 
 
 def find_statement(text: str, kind: StatementKind) -> Section | None:
@@ -206,9 +241,16 @@ def find_statement(text: str, kind: StatementKind) -> Section | None:
     stops = _stop_positions(text)
 
     best: Section | None = None
+    joined: set[int] = set()  # continuation pages already kept as part of an earlier page
     for start, title in _title_lines(text, kind.title):
-        # The section ends where the next statement begins (or after MAX_SECTION_CHARS).
+        if start in joined:
+            continue
+        # The section ends where the next statement begins (or after MAX_SECTION_CHARS),
+        # unless that is the same statement continued on the next page.
         next_title = next((pos for pos in stops if pos > start), len(text))
+        while kind.join_continued and next_title < len(text) and _is_continuation(text, next_title, kind):
+            joined.add(next_title)
+            next_title = next((pos for pos in stops if pos > next_title), len(text))
         end = min(next_title, start + MAX_SECTION_CHARS)
         body = text[start:end].lower()
         if not all(any(word in body for word in group) for group in kind.required):
@@ -227,6 +269,7 @@ class Preprocessed:
     text: str
     sections_found: list[str]
     full_text_chars: int
+    source_document: str | None = None  # file name of the document the text came from
 
     @property
     def method(self) -> str:
@@ -265,8 +308,19 @@ def estimate_tokens(chars: int) -> int:
 # --------------------------------------------------------------------- pipeline
 
 
-def preprocess_filing(accession_number: str, html_path: Path, db_path: Path = db.DB_PATH) -> Preprocessed:
-    result = extract_financial_sections(html_to_text(html_path.read_bytes()))
+def preprocess_filing(
+    accession_number: str,
+    html_path: Path,
+    db_path: Path = db.DB_PATH,
+    find_exhibit: Callable[[], Path | None] | None = None,
+) -> Preprocessed:
+    """Shorten one filing and save the text. find_exhibit returns the annual-report exhibit
+    (EX-13); it is only called when the main document has no financial statements."""
+    result = replace(extract_financial_sections(html_to_text(html_path.read_bytes())), source_document=html_path.name)
+    if not result.sections_found and find_exhibit is not None and (exhibit_path := find_exhibit()):
+        from_exhibit = extract_financial_sections(html_to_text(exhibit_path.read_bytes()))
+        if from_exhibit.sections_found:
+            result = replace(from_exhibit, source_document=exhibit_path.name)
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     out_path = PROCESSED_DIR / f"{accession_number}.txt"
     out_path.write_text(result.text, encoding="utf-8")
@@ -282,6 +336,7 @@ def preprocess_filing(accession_number: str, html_path: Path, db_path: Path = db
             est_tokens_before=estimate_tokens(result.full_text_chars),
             est_tokens_after=estimate_tokens(len(result.text)),
             text_path=str(out_path.relative_to(DATA_DIR.parent)),
+            source_document=result.source_document,
         )
     return result
 
@@ -289,21 +344,40 @@ def preprocess_filing(accession_number: str, html_path: Path, db_path: Path = db
 def main() -> None:
     with db.connect() as conn:
         filings = conn.execute(
-            "SELECT accession_number, ticker, fiscal_year, url FROM filings ORDER BY ticker, fiscal_year DESC"
+            """
+            SELECT accession_number, ticker, fiscal_year, url, cik, form, filing_date, report_date, primary_document
+            FROM filings ORDER BY ticker, fiscal_year DESC
+            """
         ).fetchall()
+
+    client: EdgarClient | None = None  # created only if an exhibit is needed (needs SEC_USER_AGENT)
+
+    def exhibit_finder(row) -> Callable[[], Path | None]:
+        def find() -> Path | None:
+            nonlocal client
+            client = client or EdgarClient()
+            filing = Filing(**{key: row[key] for key in Filing.model_fields})
+            return client.download_annual_report_exhibit(filing)
+
+        return find
 
     print(f"{'Ticker':6} {'FY':4} {'tokens before':>14} {'tokens after':>13} {'kept':>6}  sections")
     total_before = total_after = 0
     for row in filings:
-        result = preprocess_filing(row["accession_number"], cache_path_for(row["url"], CACHE_DIR))
+        html_path = cache_path_for(row["url"], CACHE_DIR)
+        result = preprocess_filing(row["accession_number"], html_path, find_exhibit=exhibit_finder(row))
         before, after = estimate_tokens(result.full_text_chars), estimate_tokens(len(result.text))
         total_before += before
         total_after += after
         sections = ", ".join(result.sections_found) or "NONE FOUND — using full text"
+        if result.sections_found and result.source_document != html_path.name:
+            sections += f" (from exhibit {result.source_document})"
         print(f"{row['ticker']:6} {row['fiscal_year']:4} {before:>14,} {after:>13,} {after / before:>6.1%}  {sections}")
 
     print(f"{'Total':11} {total_before:>14,} {total_after:>13,} {total_after / total_before:>6.1%}")
     print(f"\nTexts saved to {PROCESSED_DIR.relative_to(DATA_DIR.parent)}/ (token numbers are estimates: ~4 characters per token).")
+    if client is not None:
+        print(f"{client.request_count} new requests to the SEC for exhibits (everything else came from the cache).")
     _print_answer_coverage()
 
 

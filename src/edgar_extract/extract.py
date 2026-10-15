@@ -606,12 +606,12 @@ def main(argv: list[str] | None = None) -> None:
         ).fetchall()
     if not filings:
         raise SystemExit("No preprocessed filings found. Run edgar_extract.ground_truth and edgar_extract.preprocess first.")
-    # Without the statements (e.g. they are in an exhibit, not in the main document) the
+    # Without the statements (found neither in the main document nor in an exhibit) the
     # model would get the whole 10-K and the answers could not be in it: skip these filings.
     skipped = [f"{row['ticker']} {row['fiscal_year']}" for row in filings if row["method"] != "sections"]
     filings = [row for row in filings if row["method"] == "sections"]
     if skipped:
-        print(f"Skipped (financial statements not found in the main document): {', '.join(skipped)}")
+        print(f"Skipped (financial statements not found in the 10-K or its exhibit): {', '.join(skipped)}")
 
     client = OllamaClient()
     for model in args.models:

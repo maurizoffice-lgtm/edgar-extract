@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS preprocessing (
     est_tokens_before INTEGER NOT NULL,
     est_tokens_after  INTEGER NOT NULL,
     text_path         TEXT NOT NULL,
+    source_document   TEXT,           -- file the text came from: main document or exhibit (EX-13)
     created_at        TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -125,6 +126,7 @@ CREATE TABLE IF NOT EXISTS evaluations (
 # to an existing database, so add them here. (table, column, definition)
 ADDED_COLUMNS = [
     ("evaluations", "dataset", "TEXT NOT NULL DEFAULT 'development'"),
+    ("preprocessing", "source_document", "TEXT"),
 ]
 
 
@@ -221,13 +223,14 @@ def save_preprocessing(
     est_tokens_before: int,
     est_tokens_after: int,
     text_path: str,
+    source_document: str | None = None,
 ) -> None:
     conn.execute(
         """
         INSERT OR REPLACE INTO preprocessing
             (accession_number, method, sections_found, chars_before, chars_after,
-             est_tokens_before, est_tokens_after, text_path)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             est_tokens_before, est_tokens_after, text_path, source_document)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             accession_number,
@@ -238,6 +241,7 @@ def save_preprocessing(
             est_tokens_before,
             est_tokens_after,
             text_path,
+            source_document,
         ),
     )
 
