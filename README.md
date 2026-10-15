@@ -182,7 +182,7 @@ Requirements: macOS or Linux, Python 3.11+. Ollama is only needed to re-run the 
 ### Just look at the dashboard
 
 ```bash
-git clone https://github.com/<your-username>/edgar-extract.git
+git clone https://github.com/maurizoffice-lgtm/edgar-extract.git
 cd edgar-extract
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r dashboard/requirements.txt
