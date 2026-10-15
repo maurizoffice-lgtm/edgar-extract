@@ -3,7 +3,9 @@
 For each metric the model reports the number as printed, its unit (scale) and a quote.
 The USD value is computed here in code (value × scale), not by the model, so that
 reading errors and unit errors can be told apart later. From v3 on, the scale is read
-from the table header in code and the model's unit is ignored.
+from the table header in code and the model's unit is ignored. From v4 on, code also
+fills values the model left empty from rows labeled as such (e.g. "Loss from operations")
+and checks whether the model's net income still includes noncontrolling interests.
 
 Usage:
     python -m edgar_extract.extract                         # both default models, latest version, all filings
@@ -73,9 +75,16 @@ Rules:
 - net_income: net income attributable to the company itself — not the amount including noncontrolling interests, and not the amount "applicable to common stockholders".
 """
 
+# v4: losses. Small models left loss rows empty ("Net loss", "Loss from operations"),
+# as if a loss were not the metric. Stays general like the v2 rules.
+_RULES_V4 = _RULES_V2 + """- Losses: in a year with a loss the rows are labeled as losses, e.g. "Net loss", "Loss from operations", "Operating loss" or "Diluted loss per share". These rows are the net income, operating income and diluted earnings per share you are looking for: report them as negative numbers. Never set a value to null just because it is a loss.
+"""
+
+# Keys are the pipeline version that introduced the prompt (v3 reused prompt v2).
 PROMPTS = {
     "v1": _INTRO + _STATEMENTS,
     "v2": _INTRO + _RULES_V2 + _STATEMENTS,
+    "v4": _INTRO + _RULES_V4 + _STATEMENTS,
 }
 
 
@@ -83,6 +92,8 @@ PROMPTS = {
 class Version:
     prompt: str  # key of PROMPTS
     unit_source: str  # "model" = unit chosen by the model, "code" = read from the table header
+    check_noncontrolling: bool = False  # correct a net income that still includes noncontrolling interests
+    fill_missing: bool = False  # fill values the model left empty from rows with the metric's usual label
 
 
 # Every change gets a new version, so runs stay comparable. The tool stays the same.
@@ -90,8 +101,9 @@ VERSIONS = {
     "v1": Version(prompt="v1", unit_source="model"),
     "v2": Version(prompt="v2", unit_source="model"),  # general rules against the v1 error types
     "v3": Version(prompt="v2", unit_source="code"),  # same LLM answers as v2 (cached); only the unit changes
+    "v4": Version(prompt="v4", unit_source="code", check_noncontrolling=True, fill_missing=True),  # see CLAUDE.md
 }
-LATEST_VERSION = "v3"
+LATEST_VERSION = "v4"
 
 
 def build_tool() -> dict:
@@ -253,6 +265,175 @@ def apply_detected_units(answers: list[MetricAnswer], text: str) -> tuple[list[M
     return updated, issues
 
 
+# ------------------------------------------- net income without noncontrolling interests
+
+NONCONTROLLING = re.compile(r"non-?controlling|minority interest", re.I)
+NET_INCOME_LABEL = re.compile(r"\bnet\b.*\b(income|earnings|loss|profit)|^(less:\s*)?profit\b", re.I)
+NONCONTROLLING_WINDOW = 4  # the rows after "Net income" that may hold the split
+NONCONTROLLING_CORRECTED = "NetIncome:noncontrolling_removed"
+FILLED_FROM_ROW = ":filled_from_row"  # e.g. "OperatingIncome:filled_from_row"
+# Notes in format_issues that record a correction made by code, not an answer that broke the form.
+CODE_CORRECTIONS = (NONCONTROLLING_CORRECTED, FILLED_FROM_ROW)
+
+
+def is_code_correction(issue: str) -> bool:
+    return issue.endswith(CODE_CORRECTIONS)
+
+
+def section_lines(text: str, section: str) -> list[str]:
+    """The lines of one statement, e.g. section_lines(text, "income_statement")."""
+    parts = SECTION_MARKER.split(text)
+    for name, body in zip(parts[1::2], parts[2::2]):
+        if name.lower() == section:
+            return body.splitlines()
+    return []
+
+
+def row_cells(line: str, raw: bool = False) -> tuple[str, list]:
+    """Split a table row into its label and its numbers ("(1,234)" -> -1234, "—" -> None).
+
+    raw=True returns the cells as printed instead (same columns).
+    """
+    label, *cells = [cell.strip() for cell in line.split("|")]
+    values = []
+    for cell in cells:
+        cleaned = cell.replace("$", "").replace(" ", "")
+        value, _ = parse_number(cleaned)
+        if value is None and cleaned and cleaned.lower() not in NULL_WORDS:
+            continue  # not a number (e.g. a footnote marker): no column
+        values.append(cell if raw else value)
+    return label, values
+
+
+def _close(a: float, b: float) -> bool:
+    return abs(a - b) <= 1.0  # printed amounts are rounded, so a sum can be off by 1
+
+
+def remove_noncontrolling(answer: MetricAnswer, text: str) -> MetricAnswer | None:
+    """If the model's net income includes noncontrolling interests, return the corrected answer.
+
+    Many income statements show three rows: net income of the whole group, the part that
+    belongs to noncontrolling interests (other owners of subsidiaries), and net income
+    attributable to the company. Small models often report the first row. The fix is only
+    applied if the numbers add up: group = noncontrolling + company, in the same column.
+    Returns None if nothing needs to change.
+    """
+    if answer.metric != "NetIncome" or answer.value is None:
+        return None
+    rows = [row_cells(line) for line in section_lines(text, "income_statement") if "|" in line]
+    for i, (label, values) in enumerate(rows):
+        if not NET_INCOME_LABEL.search(label):
+            continue
+        column = next((c for c, v in enumerate(values) if v is not None and abs(v) == abs(answer.value)), None)
+        if column is None:
+            continue
+        if "attributable" in label.lower() and not NONCONTROLLING.search(label):
+            return None  # the model already chose the company's row
+        group = abs(values[column])
+        following = rows[i + 1 : i + 1 + NONCONTROLLING_WINDOW]
+        minorities = [v[column] for lab, v in following if NONCONTROLLING.search(lab) and len(v) > column and v[column]]
+        companies = [
+            v[column]
+            for lab, v in following
+            if NET_INCOME_LABEL.search(lab) and not NONCONTROLLING.search(lab) and len(v) > column and v[column] is not None
+        ]
+        for minority in minorities:
+            for company in companies:
+                if abs(company) != group and any(_close(group, abs(company) + s * abs(minority)) for s in (1, -1)):
+                    value = company if answer.value * company >= 0 else -company
+                    return answer.model_copy(
+                        update={
+                            "value": value,
+                            "value_usd": value * UNIT_SCALE[answer.unit] if answer.unit else None,
+                        }
+                    )
+        return None  # the model's row has no noncontrolling split below it
+    return None
+
+
+def apply_noncontrolling_check(answers: list[MetricAnswer], text: str) -> tuple[list[MetricAnswer], list[str]]:
+    updated, notes = [], []
+    for answer in answers:
+        corrected = remove_noncontrolling(answer, text)
+        if corrected is not None:
+            notes.append(NONCONTROLLING_CORRECTED)
+        updated.append(corrected or answer)
+    return updated, notes
+
+
+# ------------------------------------------------------ fill values the model left empty
+
+# Labels of the rows a metric is usually printed in, incl. loss years ("Net loss",
+# "Loss from operations", "Diluted loss per share"). "from continuing operations" is not
+# operating income, so the label must end with "from operations".
+ROW_LABELS = {
+    "OperatingIncome": re.compile(
+        r"^(operating (income|loss|profit)|.*\b(income|loss|earnings|profit)\b.*\bfrom operations)\W*$", re.I
+    ),
+    "NetIncome": re.compile(r"^net\W+(income|earnings|loss)(\W+(income|earnings|loss))?\W*$", re.I),
+    "EPS": re.compile(r"dilut", re.I),
+}
+PER_SHARE_AMOUNT = re.compile(r"\d\.\d{2}\b")
+
+
+def year_column(answers: list[MetricAnswer], rows: list[tuple[str, list]]) -> int | None:
+    """Column of the fiscal year, taken from an income-statement value the model did report."""
+    for answer in answers:
+        if answer.value is None or answer.metric not in ("Revenue", "OperatingIncome", "NetIncome", "EPS"):
+            continue
+        for _, values in rows:
+            column = next((c for c, v in enumerate(values) if v is not None and abs(v) == abs(answer.value)), None)
+            if column is not None:
+                return column
+    return None
+
+
+def fill_missing(answers: list[MetricAnswer], text: str) -> tuple[list[MetricAnswer], list[str]]:
+    """Fill OperatingIncome, NetIncome and EPS the model left empty from the row with their usual label.
+
+    Small models leave loss rows empty ("Net loss", "Loss from operations"). The value is
+    taken from the same column as the values the model did report. Only empty answers
+    are touched, so a value the model gave is never replaced.
+    """
+    lines = [line for line in section_lines(text, "income_statement") if "|" in line]
+    rows = [row_cells(line) for line in lines]
+    column = year_column(answers, rows)
+    if column is None:
+        return answers, []
+    scale = detect_scales(text).get("income_statement")
+    updated, notes = [], []
+    for answer in answers:
+        pattern = ROW_LABELS.get(answer.metric)
+        if answer.value is not None or pattern is None:
+            updated.append(answer)
+            continue
+        found = None
+        for line, (label, values) in zip(lines, rows):
+            if not pattern.search(label) or len(values) <= column or values[column] is None:
+                continue
+            if answer.metric == "EPS" and not PER_SHARE_AMOUNT.search(row_cells(line, raw=True)[1][column]):
+                continue  # e.g. "Diluted | 384" (number of shares)
+            found = (line, values[column])
+            break
+        if found is None:
+            updated.append(answer)
+            continue
+        line, value = found
+        unit = "per share" if answer.metric == "EPS" else scale
+        updated.append(
+            answer.model_copy(
+                update={
+                    "value": value,
+                    "unit": unit,
+                    "value_usd": value * UNIT_SCALE[unit] if unit else None,
+                    "quote": line,
+                }
+            )
+        )
+        notes.append(answer.metric + FILLED_FROM_ROW)
+    return updated, notes
+
+
 # --------------------------------------------------------------------- pipeline
 
 
@@ -272,6 +453,12 @@ def extract_filing(
         answers, unit_issues = apply_detected_units(answers, text)
         # The model's own unit no longer matters, so its unit problems are not issues anymore.
         issues = [i for i in issues if not i.endswith(":unknown_unit")] + unit_issues
+    if spec.fill_missing:
+        answers, notes = fill_missing(answers, text)
+        issues += notes
+    if spec.check_noncontrolling:  # after filling: a filled net income may include noncontrolling interests
+        answers, notes = apply_noncontrolling_check(answers, text)
+        issues += notes
 
     with db.connect(db_path) as conn:
         db.save_extraction(conn, accession_number, version, response, answers, issues)

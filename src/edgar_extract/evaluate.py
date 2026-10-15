@@ -12,7 +12,8 @@ Metrics without ground truth (e.g. OperatingIncome for banks) are not counted in
 accuracy; they are reported separately ("answered although not reported").
 
 Results are always shown per data set: the development companies (used to tune prompts
-and code) and the held-out test companies (never used for tuning), see datasets.py.
+and code), test set 1 (held out until v3; its errors were studied for v4) and test set 2
+(held out, never used for tuning), see datasets.py.
 
 Usage:
     python -m edgar_extract.evaluate      # evaluates all runs, writes reports/evaluation.md
@@ -28,8 +29,8 @@ import pandas as pd
 
 from edgar_extract import db
 from edgar_extract.config import PROJECT_ROOT, REPORTS_DIR
-from edgar_extract.datasets import DEVELOPMENT, TEST, dataset_of
-from edgar_extract.extract import METRIC_FIELDS, UNIT_SCALE
+from edgar_extract.datasets import DEVELOPMENT, TEST, TEST2, dataset_of
+from edgar_extract.extract import METRIC_FIELDS, UNIT_SCALE, is_code_correction
 
 TOLERANCE = 0.005  # 0.5 % relative
 SCALES = (1.0, 1e3, 1e6, 1e9)
@@ -282,7 +283,7 @@ def _money(value) -> str:
     return f"{value / 1e6:,.0f} M"
 
 
-DATASET_LABELS = {DEVELOPMENT: "Development", TEST: "Held-out test"}
+DATASET_LABELS = {DEVELOPMENT: "Development", TEST: "Test set 1", TEST2: "Test set 2"}
 
 
 def _with_labels(df: pd.DataFrame) -> pd.DataFrame:
@@ -295,7 +296,7 @@ def _with_labels(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _column_order(df: pd.DataFrame) -> list[str]:
-    """Wide-table columns: development runs first, then held-out test runs."""
+    """Wide-table columns: development runs first, then test set 1, then test set 2."""
     keys = df[["dataset", "run", "column"]].drop_duplicates()
     keys = keys.assign(order=keys["dataset"].map(list(DATASET_LABELS).index)).sort_values(["order", "run"])
     return list(keys["column"])
@@ -330,8 +331,13 @@ def build_report(evals: pd.DataFrame, runs: pd.DataFrame) -> str:
         )
     if (evals["dataset"] == TEST).any():
         lines.append(
-            f"- **Held-out test:** {_dataset_summary(evals, TEST)}. "
-            "Added afterwards and never used for tuning."
+            f"- **Test set 1:** {_dataset_summary(evals, TEST)}. "
+            "Held out until v3; its errors were then studied to build v4, so v4 results here are optimistic too."
+        )
+    if (evals["dataset"] == TEST2).any():
+        lines.append(
+            f"- **Test set 2:** {_dataset_summary(evals, TEST2)}. "
+            "Added after v4 was written and never used for tuning — the honest measure for v4."
         )
     lines += ["", "## Overall accuracy", ""]
 
@@ -353,6 +359,7 @@ def build_report(evals: pd.DataFrame, runs: pd.DataFrame) -> str:
                 "Avg seconds / filing": f"{r['duration_s'].mean():.1f}",
                 "Cost / filing": f"${r['cost_usd'].mean():.4f}",
                 "Format issues": int(r["format_issue_count"].sum()),
+                "Code corrections": int(r["code_correction_count"].sum()),
                 "Quotes found in text": _pct(quotes.astype(bool)) if len(quotes) else "—",
             }
         )
@@ -447,7 +454,9 @@ def load_runs(db_path: Path = db.DB_PATH) -> pd.DataFrame:
             "FROM extraction_runs r JOIN filings f USING (accession_number)"
         ).fetchall()
     df = pd.DataFrame([dict(r) for r in rows])
-    df["format_issue_count"] = df["format_issues"].map(lambda s: len(json.loads(s)))
+    issues = df["format_issues"].map(json.loads)
+    df["format_issue_count"] = issues.map(lambda items: sum(not is_code_correction(i) for i in items))
+    df["code_correction_count"] = issues.map(lambda items: sum(is_code_correction(i) for i in items))
     df["dataset"] = df["ticker"].map(dataset_of)
     return df
 

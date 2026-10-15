@@ -116,7 +116,7 @@ CREATE TABLE IF NOT EXISTS evaluations (
     detail           TEXT NOT NULL,
     quote            TEXT NOT NULL,
     quote_in_source  INTEGER,  -- 1/0, NULL if no value was given
-    dataset          TEXT NOT NULL,  -- "development" or "test" (held out), see datasets.py
+    dataset          TEXT NOT NULL,  -- "development", "test" or "test2" (test sets 1 and 2), see datasets.py
     PRIMARY KEY (accession_number, model, version, metric)
 );
 """

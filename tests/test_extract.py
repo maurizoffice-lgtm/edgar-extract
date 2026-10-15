@@ -8,14 +8,19 @@ import pytest
 
 from edgar_extract import db
 from edgar_extract.extract import (
+    NONCONTROLLING_CORRECTED,
     apply_detected_units,
     build_prompt,
     detect_scales,
     build_tool,
     extract_filing,
+    fill_missing,
+    is_code_correction,
     normalize_unit,
     parse_number,
     parse_tool_arguments,
+    remove_noncontrolling,
+    row_cells,
 )
 from edgar_extract.llm import LLMUnavailableError, OllamaClient
 
@@ -82,7 +87,7 @@ def test_parse_tool_arguments_missing_parts():
     assert parse_tool_arguments(None) == ([], ["no_tool_call"])
 
 
-@pytest.mark.parametrize("version", ["v1", "v2"])
+@pytest.mark.parametrize("version", ["v1", "v2", "v4"])
 def test_prompt_names_fiscal_year_and_contains_text(version):
     prompt = build_prompt("Total net sales | 416,161", date(2025, 9, 27), version)
     assert "2025-09-27" in prompt
@@ -242,3 +247,148 @@ def test_v3_uses_v2_prompt_and_code_units(tmp_path):
     with db.connect(db_path) as conn:
         versions = [r[0] for r in conn.execute("SELECT DISTINCT version FROM extraction_runs ORDER BY 1")]
     assert versions == ["v2", "v3"]
+
+
+NONCONTROLLING_TEXT = """=== INCOME_STATEMENT ===
+CONSOLIDATED STATEMENTS OF INCOME
+(In millions, except per share amounts)
+Years ended | 2025 | 2024
+Net income | $17,949 | $12,095
+Net income attributable to noncontrolling interests | 443 | 481
+Net income attributable to Example Corp | 17,506 | 11,614
+Net Income | $17,949 | $12,095
+Diluted earnings per share | $4.14 | $2.75
+=== BALANCE_SHEET ===
+(In millions)
+Total assets | 5,000 | 4,000"""
+
+LOSS_TEXT = """=== INCOME_STATEMENT ===
+(Dollars in millions, except per share data)
+Loss from operations | (10,707) | (773)
+Net loss | (11,829) | (2,242)
+Less: net loss attributable to noncontrolling interest | (12) | (20)
+Net loss attributable to Example shareholders | (11,817) | (2,222)
+Less: preferred stock dividends | 58 | —
+Net loss attributable to Example common shareholders | ($ 11,875) | ($ 2,222)"""
+
+
+def _net_income(value, text):
+    answers, _ = parse_tool_arguments({"net_income": {"value": value, "unit": "millions", "quote": ""}})
+    answers, _ = apply_detected_units(answers, text)
+    return answers[0]
+
+
+def test_row_cells():
+    assert row_cells("Net loss | (11,829) | ($ 2,242) | — | $4.15") == ("Net loss", [-11829.0, -2242.0, None, 4.15])
+
+
+def test_remove_noncontrolling_picks_the_company_row():
+    fixed = remove_noncontrolling(_net_income(17949, NONCONTROLLING_TEXT), NONCONTROLLING_TEXT)
+    assert fixed.value == 17506 and fixed.value_usd == 17_506_000_000
+
+
+def test_remove_noncontrolling_uses_the_same_column():
+    assert remove_noncontrolling(_net_income(12095, NONCONTROLLING_TEXT), NONCONTROLLING_TEXT).value == 11614
+
+
+def test_remove_noncontrolling_with_losses():
+    fixed = remove_noncontrolling(_net_income(-11829, LOSS_TEXT), LOSS_TEXT)
+    assert fixed.value == -11817  # not the row after preferred dividends (-11,875)
+
+
+@pytest.mark.parametrize("value", [17506, 4.14, 999, None])
+def test_remove_noncontrolling_leaves_other_answers_alone(value):
+    assert remove_noncontrolling(_net_income(value, NONCONTROLLING_TEXT), NONCONTROLLING_TEXT) is None
+
+
+def test_remove_noncontrolling_needs_numbers_that_add_up():
+    text = NONCONTROLLING_TEXT.replace("17,506", "17,000")
+    assert remove_noncontrolling(_net_income(17949, text), text) is None
+
+
+def test_v4_prompt_adds_loss_rule_to_v2():
+    v2 = build_prompt("TEXT", date(2025, 9, 27), "v2")
+    v4 = build_prompt("TEXT", date(2025, 9, 27), "v4")
+    assert v4.startswith(v2.split("\nFinancial statements:")[0])
+    assert "Never set a value to null just because it is a loss" in v4
+    assert "Never set a value to null" not in v2
+
+
+def test_v4_corrects_net_income_and_notes_it(tmp_path):
+    arguments = {**GOOD_ARGUMENTS, "net_income": {"value": 17949, "unit": "millions", "quote": "Net income"}}
+
+    def handler(request):
+        return httpx.Response(
+            200,
+            json={
+                "message": {"tool_calls": [{"function": {"name": "report_financials", "arguments": arguments}}]},
+                "prompt_eval_count": 10,
+                "eval_count": 5,
+            },
+        )
+
+    client = OllamaClient(cache_dir=tmp_path / "llm", http=httpx.Client(transport=httpx.MockTransport(handler)))
+    db_path = tmp_path / "test.db"
+    with db.connect(db_path) as conn:
+        conn.execute("INSERT INTO filings VALUES ('acc-1', 'EX', 1, '10-K', '2026-02-01', '2025-12-31', 2025, 'a', 'u')")
+
+    _, answers, issues = extract_filing(
+        client, "qwen3.5:2b", "acc-1", NONCONTROLLING_TEXT, date(2025, 12, 31), version="v4", db_path=db_path
+    )
+    assert {a.metric: a.value for a in answers}["NetIncome"] == 17506
+    assert NONCONTROLLING_CORRECTED in issues
+
+
+FILL_TEXT = """=== INCOME_STATEMENT ===
+(Dollars in millions, except per share data)
+Years ended December 31, | 2024 | 2023
+Total revenues | 66,517 | 77,794
+Loss from operations | (10,707) | (773)
+Loss from continuing operations before taxes | (12,210) | (2,005)
+Net loss | (11,829) | (2,242)
+Less: net loss attributable to noncontrolling interest | (12) | (20)
+Net loss attributable to Example shareholders | (11,817) | (2,222)
+Diluted loss per share | ($ 18.36) | ($ 3.67)
+Weighted average shares - Diluted | 644 | 605"""
+
+
+def _answers(**values):
+    fields = {"Revenue": "revenue", "OperatingIncome": "operating_income", "NetIncome": "net_income", "EPS": "eps_diluted"}
+    arguments = {fields[m]: {"value": v, "unit": "millions", "quote": ""} for m, v in values.items()}
+    answers, _ = parse_tool_arguments(arguments)
+    return apply_detected_units(answers, FILL_TEXT)[0]
+
+
+def test_fill_missing_takes_loss_rows_from_the_year_column():
+    filled, notes = fill_missing(_answers(Revenue=66517, OperatingIncome=None, NetIncome=None, EPS=None), FILL_TEXT)
+    by_metric = {a.metric: a for a in filled}
+    assert by_metric["OperatingIncome"].value_usd == -10_707_000_000  # not "from continuing operations"
+    assert by_metric["NetIncome"].value == -11829  # noncontrolling interests are removed in a later step
+    assert by_metric["EPS"].value_usd == -18.36 and by_metric["EPS"].unit == "per share"
+    assert notes == ["OperatingIncome:filled_from_row", "NetIncome:filled_from_row", "EPS:filled_from_row"]
+
+    prior_year, _ = fill_missing(_answers(Revenue=77794, OperatingIncome=None), FILL_TEXT)
+    assert prior_year[1].value == -773
+
+
+def test_fill_missing_never_replaces_an_answer():
+    answers = _answers(Revenue=66517, OperatingIncome=123, NetIncome=None, EPS=None)
+    filled, notes = fill_missing(answers, FILL_TEXT)
+    assert filled[1].value == 123
+    assert "OperatingIncome:filled_from_row" not in notes
+
+
+def test_fill_missing_needs_a_known_column_and_a_matching_row():
+    assert fill_missing(_answers(Revenue=None, OperatingIncome=None), FILL_TEXT) == (
+        _answers(Revenue=None, OperatingIncome=None),
+        [],
+    )
+    text = FILL_TEXT.replace("Loss from operations", "Other operating items")
+    filled, notes = fill_missing(_answers(Revenue=66517, OperatingIncome=None), text)
+    assert filled[1].value is None and notes == []
+
+
+def test_code_corrections_are_recognized():
+    assert is_code_correction(NONCONTROLLING_CORRECTED)
+    assert is_code_correction("EPS:filled_from_row")
+    assert not is_code_correction("revenue:value_not_a_number")

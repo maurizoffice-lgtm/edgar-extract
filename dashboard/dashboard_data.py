@@ -14,7 +14,9 @@ import pandas as pd
 DEFAULT_DB_PATH = Path(__file__).resolve().parents[1] / "data" / "dashboard.db"
 
 METRICS = ["Revenue", "OperatingIncome", "NetIncome", "EPS", "TotalAssets"]
-DATASETS = {"test": "Held-out test", "development": "Development"}
+DATASETS = {"test2": "Test set 2", "test": "Test set 1", "development": "Development"}
+# Notes in format_issues that are corrections made by code (see edgar_extract.extract), not format problems.
+CODE_CORRECTIONS = (":noncontrolling_removed", ":filled_from_row")
 CORRECT = "correct"
 NO_TRUTH = ("no_truth_answered", "no_truth_null")
 CATEGORY_LABELS = {
@@ -51,7 +53,9 @@ def load_evaluations(db_path: Path = DEFAULT_DB_PATH) -> pd.DataFrame:
 
 def load_runs(db_path: Path = DEFAULT_DB_PATH) -> pd.DataFrame:
     df = _query(db_path, "SELECT r.*, f.dataset FROM extraction_runs r JOIN filings f USING (accession_number)")
-    df["format_issue_count"] = df["format_issues"].map(lambda s: len(json.loads(s)))
+    issues = df["format_issues"].map(json.loads)
+    df["format_issue_count"] = issues.map(lambda items: sum(not i.endswith(CODE_CORRECTIONS) for i in items))
+    df["code_correction_count"] = issues.map(lambda items: sum(i.endswith(CODE_CORRECTIONS) for i in items))
     df["run"] = [run_label(m, v) for m, v in zip(df["model"], df["version"])]
     return df
 
@@ -73,6 +77,7 @@ def run_summary(evals: pd.DataFrame, runs: pd.DataFrame) -> pd.DataFrame:
         cost_per_filing=("cost_usd", "mean"),
         input_tokens=("input_tokens", "mean"),
         format_issues=("format_issue_count", "sum"),
+        code_corrections=("code_correction_count", "sum"),
     )
     return summary.merge(per_run, on="run", how="left").sort_values(["model", "version"]).reset_index(drop=True)
 

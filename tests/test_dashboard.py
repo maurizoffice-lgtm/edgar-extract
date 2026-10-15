@@ -23,7 +23,7 @@ def dashboard_db(tmp_path):
             "INSERT INTO preprocessing (accession_number, method, sections_found, chars_before, chars_after, "
             "est_tokens_before, est_tokens_after, text_path) VALUES ('acc-1', 'sections', '', 1, 1, 1, 1, 'acc-1.txt')"
         )
-        for model, issues in (("big", []), ("small", ["revenue:value_not_a_number"])):
+        for model, issues in (("big", []), ("small", ["revenue:value_not_a_number", "NetIncome:noncontrolling_removed"])):
             conn.execute(
                 "INSERT INTO extraction_runs VALUES ('acc-1', ?, 'v1', 2500, 300, 10.0, 0.0, ?, 'RAW', datetime('now'))",
                 (model, json.dumps(issues)),
@@ -65,7 +65,8 @@ def test_run_summary(dashboard_db):
     summary = data.run_summary(data.load_evaluations(target), data.load_runs(target)).set_index("model")
     assert summary.loc["big", "accuracy"] == 1.0
     assert summary.loc["small", "accuracy"] == 0.5  # the OperatingIncome answer has no ground truth
-    assert summary.loc["small", "format_issues"] == 1
+    assert summary.loc["small", "format_issues"] == 1  # the code correction is not a format issue
+    assert summary.loc["small", "code_corrections"] == 1
 
 
 def test_accuracy_by_metric_and_error_counts(dashboard_db):

@@ -64,8 +64,9 @@ Preprocessing findings (Phase 3):
 6. Dashboard — Streamlit, reads **only** from SQLite (no API key needed)
 7. README — problem, Mermaid architecture, results, top errors, cost per filing, how to run (done)
 
-Scope: development set AAPL, MSFT, JNJ, JPM, XOM × last 2 10-Ks; held-out test set
-20 more companies × last 5 10-Ks (`datasets.py`). Never tune prompts on the test set.
+Scope: development set AAPL, MSFT, JNJ, JPM, XOM × last 2 10-Ks; test set 1 (20 companies ×
+last 5 10-Ks, seen since v4) and test set 2 (15 companies × 5, unseen) in `datasets.py`.
+Never tune prompts or code on test set 2.
 
 ## Tech stack
 Python 3.11+, venv + pip (pyproject.toml), httpx, BeautifulSoup + lxml, Ollama (local LLMs), pydantic,
@@ -155,6 +156,32 @@ Held-out test (v3 unchanged, 20 companies × 5 10-Ks = 100 filings, 470 graded v
   negatives and one-decimal millions (MCD).
 - The test set is now "seen": fixing its errors needs another fresh held-out set.
 
+Version 4 (targets the two 2b error types of test set 1; measured on test set 2):
+- `datasets.py`: TEST = test set 1 (seen since v4), TEST2 = test set 2 (15 companies × 5,
+  chosen by the author before v4 ran on them: INTC, T, CMCSA, UBER, WBD, MRNA, F, DUK, AIG,
+  GS, COST, ORCL, NKE, LLY, LMT). Unknown tickers count as TEST2. Never tune on test set 2.
+- v4 = prompt "v4" (v2 rules + loss rule) + code units + `fill_missing` (empty
+  OperatingIncome/NetIncome/EPS taken from rows with the usual label, in the column where the
+  model found another income-statement value; never replaces an answer) +
+  `remove_noncontrolling` (group = noncontrolling + company must add up in the same column).
+  Corrections are stored in `format_issues` as "<Metric>:filled_from_row" /
+  "NetIncome:noncontrolling_removed"; report and dashboard count them as "Code corrections",
+  not as format issues (`is_code_correction`).
+- The loss rule in the prompt alone was not enough for 2b (Boeing: 2 of 4 loss-year net
+  incomes, no operating income/EPS) → moved into code, as in v3.
+- Results (accuracy): dev 2b 95 → 100 %, 4b 100 %. Test set 1: 2b 90 → 97 %, 4b 97 → 97 %.
+  Test set 2: 2b 88 → 95 % (310 → 335/351), 4b 95 → 97 % (335 → 342/351).
+- Not fixed (test set 2 stays unseen until a third set exists): WBD has two noncontrolling
+  rows (regular + redeemable) → check does not fire; "applicable to common" (GS, T); AIG EPS;
+  T 2021 header without scale (2b unit errors). DUK revenue is a ground-truth artifact
+  (XBRL note value; statement "Total operating revenues").
+- Side effects of the v4 prompt: models answer OperatingIncome with "income before taxes"
+  more often where none is reported (4b 9 → 12 of 24 on test set 2); 3 values right in v3
+  are wrong in v4 (EPS). The code fallback itself never filled a metric without ground truth.
+- Preprocessing fixes found by the coverage check before the test-set-2 extraction (110
+  earlier texts byte-identical): "Net (loss) income" counts as a net income word (MRNA), and
+  statements with "three months ended"/"quarter" in their header are skipped (AIG 2024).
+
 ## Layout
 ```
 src/edgar_extract/   # package code
@@ -188,7 +215,7 @@ python -m edgar_extract.download
 python -m edgar_extract.ground_truth
 python -m edgar_extract.preprocess
 ollama serve &                                   # local LLMs
-python -m edgar_extract.extract --version v3
+python -m edgar_extract.extract --version v4
 python -m edgar_extract.evaluate                 # writes reports/evaluation.md
 python -m edgar_extract.export_dashboard         # writes data/dashboard.db (committed)
 streamlit run dashboard/app.py

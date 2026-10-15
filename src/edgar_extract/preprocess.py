@@ -10,8 +10,9 @@ auditor's report, summary tables in the management discussion). The real stateme
 recognized by
 1. a title that stands alone on its line,
 2. typical line items below it (e.g. "Total assets"),
-3. a title that says "consolidated" (if any candidate does), and
-4. many numbers right after it.
+3. a title that says "consolidated" (if any candidate does),
+4. many numbers right after it, and
+5. no quarterly columns ("Three Months Ended") in its header.
 
 Usage:
     python -m edgar_extract.preprocess      # all filings in the database
@@ -123,6 +124,9 @@ TITLE_DATE = re.compile(r"\b(?:for the (?:fiscal )?years? ended|at|as of) [a-z]+
 MAX_STOP_LINE = 100
 
 NUMBER = re.compile(r"\d{1,3}(?:,\d{3})+|\d+\.\d{2}\b")
+# Quarterly tables (e.g. a "Quarterly financial data" note) have more columns, hence more numbers.
+QUARTERLY = re.compile(r"three months ended|quarter", re.I)
+HEADER_CHARS = 300  # where the column headings of a statement are
 SCORE_WINDOW = 2_000  # characters after the title in which numbers are counted
 MAX_SECTION_CHARS = 20_000
 
@@ -138,8 +142,11 @@ STATEMENTS = [
     StatementKind(
         name="income_statement",
         title=INCOME_TITLE,
-        # "profit": some companies call net income just "Profit".
-        required=[["net income", "net earnings", "net loss", "profit"], ["per share", "per common share", "dilut"]],
+        # "profit": some companies call net income just "Profit"; "Net (loss) income" in loss years.
+        required=[
+            ["net income", "net earnings", "net loss", "net (loss", "net (income", "net (earnings", "profit"],
+            ["per share", "per common share", "dilut"],
+        ],
     ),
     StatementKind(
         name="balance_sheet",
@@ -201,6 +208,8 @@ def find_statement(text: str, kind: StatementKind) -> Section | None:
         end = min(next_title, start + MAX_SECTION_CHARS)
         body = text[start:end].lower()
         if not all(any(word in body for word in group) for group in kind.required):
+            continue
+        if QUARTERLY.search(text, start, start + HEADER_CHARS):
             continue
         score = len(NUMBER.findall(text, start, min(end, start + SCORE_WINDOW)))
         candidate = Section(kind.name, title, start, end, score)

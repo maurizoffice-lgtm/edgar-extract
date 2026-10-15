@@ -61,7 +61,7 @@ st.caption(
     f"{all_evals['ticker'].nunique()} companies, models: {', '.join(models)}."
 )
 
-# Development companies were used to tune prompts and code; held-out companies never were.
+# Development companies were used to tune prompts and code; test set 2 never was.
 datasets = [d for d in data.DATASETS if d in set(all_evals["dataset"])]
 dataset = st.radio(
     "Data set",
@@ -72,8 +72,9 @@ dataset = st.radio(
         f"{data.DATASETS[d]} ({all_evals.loc[all_evals['dataset'] == d, 'ticker'].nunique()} companies, "
         f"{all_evals.loc[all_evals['dataset'] == d, 'accession_number'].nunique()} filings)"
     ),
-    help="Development: the companies the prompts and code were tuned on (optimistic). "
-    "Held-out test: companies added afterwards and never used for tuning.",
+    help="Test set 2: companies added after v4 was written, never used for tuning (the honest measure). "
+    "Test set 1: held out until v3; its errors were studied to build v4. "
+    "Development: the companies the prompts and code were tuned on (optimistic).",
 )
 evals = all_evals[all_evals["dataset"] == dataset]
 runs = all_runs[all_runs["dataset"] == dataset]
@@ -114,7 +115,10 @@ if view == "Overview":
             c.metric("Cost / filing", f"${row['cost_per_filing']:.2f}")
 
     st.subheader("Accuracy by version")
-    st.caption("v1: first prompt · v2: prompt with general rules · v3: v2 + unit read from the table header in code")
+    st.caption(
+        "v1: first prompt · v2: prompt with general rules · v3: v2 + unit read from the table header in code · "
+        "v4: v3 + rule for loss rows + empty values filled and net income checked in code"
+    )
     st.altair_chart(grouped_accuracy_bars(summary, "version", "Version", "model", model_scale), width="stretch")
 
     st.subheader("Runs")
@@ -123,7 +127,7 @@ if view == "Overview":
             accuracy=summary["accuracy"] * 100,
             cost_per_filing=summary["cost_per_filing"].map(lambda v: f"${v:.2f}"),
         )[
-            ["run", "accuracy", "seconds_per_filing", "format_issues", "cost_per_filing"]
+            ["run", "accuracy", "seconds_per_filing", "format_issues", "code_corrections", "cost_per_filing"]
         ],
         hide_index=True,
         width="stretch",
@@ -132,6 +136,9 @@ if view == "Overview":
             "accuracy": st.column_config.NumberColumn("Accuracy", format="%.0f%%"),
             "seconds_per_filing": st.column_config.NumberColumn("Sec / filing", format="%.1f"),
             "format_issues": st.column_config.NumberColumn("Format issues", help="Answers that did not follow the form, e.g. numbers as text"),
+            "code_corrections": st.column_config.NumberColumn(
+                "Code corrections", help="Values corrected in code (v4: empty loss rows filled, noncontrolling interests removed)"
+            ),
             "cost_per_filing": "Cost / filing",
         },
     )

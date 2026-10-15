@@ -118,3 +118,18 @@ def test_results_of_operations_title_needs_its_date():
 
     balance = "Consolidated Financial Position at December 31,\nTotal assets | 87,764\nTotal liabilities | 68,270\n"
     assert find_statement(balance, BALANCE) is not None
+
+
+def test_net_loss_income_label_counts_as_net_income():
+    statement = _statement("CONSOLIDATED STATEMENTS OF OPERATIONS").replace("Net income", "Net (loss) income")
+    section = find_statement(statement, INCOME)
+    assert section is not None
+
+
+def test_quarterly_table_is_not_the_statement():
+    statement = _statement("Consolidated Statements of Income (Loss)")
+    quarterly = _statement("CONSOLIDATED STATEMENTS OF INCOME (LOSS)", rows=20, columns=8).replace(
+        "(In millions)", "Three Months Ended\nMarch 31, | June 30, | September 30, | December 31,"
+    )
+    section = find_statement(f"{statement}\n{quarterly}", INCOME)
+    assert section is not None and section.title == "Consolidated Statements of Income (Loss)"
