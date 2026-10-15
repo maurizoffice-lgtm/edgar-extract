@@ -59,16 +59,16 @@ Preprocessing findings (Phase 3):
 1. EDGAR client — ticker → CIK, list 10-K filings, download main document
 2. Ground truth — XBRL companyfacts, matched to filing via accession number → SQLite
 3. Preprocessing — HTML → text, locate financial statements / Item 8, log tokens before/after
-4. LLM extraction — Claude tool use + pydantic schema; value, unit, USD-normalized value, source quote; log tokens + cost
+4. LLM extraction — local models via Ollama, tool call + lenient parsing; value, unit, USD value (computed in code), quote; log tokens + cost
 5. Evaluation — compare to ground truth (0.5 % relative tolerance), error categories, Markdown report in `reports/`
 6. Dashboard — Streamlit, reads **only** from SQLite (no API key needed)
-7. README — problem, Mermaid architecture, results, top errors, cost per filing, how to run
+7. README — problem, Mermaid architecture, results, top errors, cost per filing, how to run (done)
 
 Scope: start with AAPL, MSFT, JNJ, JPM, XOM × last 2 10-Ks. Only after that
 works, expand to ~20 companies × 5 years.
 
 ## Tech stack
-Python 3.11+, venv + pip (pyproject.toml), httpx, anthropic SDK, pydantic,
+Python 3.11+, venv + pip (pyproject.toml), httpx, BeautifulSoup + lxml, Ollama (local LLMs), pydantic,
 SQLite (stdlib `sqlite3`), pandas, Streamlit, pytest, python-dotenv.
 
 Models: **the author does not want to pay**, so v1 uses free local models via Ollama
